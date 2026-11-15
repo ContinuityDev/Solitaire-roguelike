@@ -1,19 +1,19 @@
 class_name EnhancementDB
 extends RefCounted
 
-## Run-level stamps bought at the desk. Applied to the human hand after each deal.
+## Run-level stamps bought at the desk. Applied per seat after each deal.
 
 const ENHANCEMENTS: Array = [
-	{"id": "steel", "name": "Steel Card", "icon": "ST", "price": 11,
+	{"id": "steel", "name": "Steel Card", "icon": "ST", "price": 13,
 		"desc": "One card in your hand is immune to tribute."},
-	{"id": "gilded", "name": "Gilded Seal", "icon": "$", "price": 9,
+	{"id": "gilded", "name": "Gilded Seal", "icon": "$", "price": 11,
 		"desc": "+2 gold whenever you finish 1st or 2nd."},
-	{"id": "union", "name": "Union Deal", "icon": "1", "price": 10,
+	{"id": "union", "name": "Union Deal", "icon": "1", "price": 12,
 		"desc": "Tributes that involve you are 1 card smaller."},
-	{"id": "wax", "name": "Wax Seal", "icon": "WAX", "price": 8,
+	{"id": "wax", "name": "Wax Seal", "icon": "WAX", "price": 10,
 		"desc": "When you are President/VP, return 1 fewer card."},
-	{"id": "lucky", "name": "Lucky Draw", "icon": "+1", "price": 7,
-		"desc": "One extra kitty card each deal (stacks with Incumbent)."},
+	{"id": "lucky", "name": "Lucky Draw", "icon": "↔", "price": 9,
+		"desc": "After each deal, swap your lowest card with a random kitty card."},
 ]
 
 static func get_by_id(id: String) -> Dictionary:

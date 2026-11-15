@@ -13,6 +13,7 @@ var _banner: Label
 var _msg: Label
 var _ai_row: HBoxContainer
 var _trick_label: Label
+var _odds: Label
 var _trick_cards: Control
 var _hand_row: Control
 var _btn_row: HFlowContainer
@@ -108,6 +109,11 @@ func _build_ui() -> void:
 	_trick_label = Label.new()
 	_trick_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	root.add_child(_trick_label)
+	_odds = Label.new()
+	_odds.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_odds.add_theme_font_size_override("font_size", 11)
+	_odds.add_theme_color_override("font_color", Color(0.78, 0.82, 0.70))
+	root.add_child(_odds)
 	_trick_cards = Control.new()
 	_trick_cards.custom_minimum_size = Vector2(0, 96)
 	_trick_cards.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -304,12 +310,15 @@ func _start_round() -> void:
 		_show_run_over()
 		return
 	run.apply_populist()
-	game.setup(live, run.rng, run.packed_level(), run.favorite_rank, run.extra_cards(), run.lead_seat())
-	EnhancementDB.apply_to_hand(game.hand_of(0), run.owned_enhancements, run.rng)
+	game.setup(live, run.rng, 0, 0, 0, run.lead_seat())
+	var deal_logs: Array = run.apply_deal_effects(game)
 	if game.current_player == 0:
 		_message("Round %d. Stake %d. You lead — yellow cards can be played." % [run.round_n, run.stake()])
 	else:
 		_message("Round %d. %s leads." % [run.round_n, RunManager.NAMES[game.current_player]])
+	if not deal_logs.is_empty():
+		for line in deal_logs:
+			run.log_event(str(line))
 	_deal_anim = true
 	await get_tree().process_frame
 	await get_tree().process_frame
@@ -393,6 +402,11 @@ func _ai_act() -> void:
 		return
 	var seat: int = game.current_player
 	var persona: int = (seat % 3)
+	var act_id: String = PresidentAI.choose_turn_action(game, run, seat)
+	if act_id != "":
+		_fire_turn_action(seat, act_id)
+		_refresh()
+		await get_tree().create_timer(0.22).timeout
 	var choice: Dictionary = PresidentAI.choose(game, seat, persona)
 	if bool(choice.get("pass", false)):
 		game.pass_turn(seat)
@@ -411,6 +425,7 @@ func _ai_act() -> void:
 		_refresh()
 		_continue_turns()
 		return
+	_award_rank_gold(seat, int(combo.get("rank", 0)))
 	_message("%s plays %s." % [RunManager.NAMES[seat], str(r.get("label", ""))])
 	await _fly_from(origins, combo)
 	_refresh()
@@ -424,7 +439,7 @@ func _on_play() -> void:
 		return
 	var rank: int = (_selected[0] as CardData).rank
 	var combo: Dictionary = {"rank": rank, "count": _selected.size()}
-	if not game.is_legal_combo(combo):
+	if not game.is_legal_combo(combo, 0):
 		_message("Need %d of that rank to follow." % game.trick_count if not game.lead else "Illegal combo.")
 		return
 	var origins: Array = _selected_origins()
@@ -433,6 +448,7 @@ func _on_play() -> void:
 		_message("Illegal play (%s)." % str(r.get("reason", "")))
 		return
 	_selected.clear()
+	_award_rank_gold(0, rank)
 	_message("You play %s." % str(r.get("label", "")))
 	_busy = true
 	await _fly_from(origins, combo)
@@ -567,6 +583,26 @@ func _pop_pass(seat: int) -> void:
 			chip.queue_free()
 	)
 
+func _award_rank_gold(seat: int, rank: int) -> void:
+	var n: int = run.rank_gold_on_play(seat, rank)
+	if n <= 0:
+		return
+	run.add_gold(seat, n)
+	var who: String = "You" if seat == 0 else RunManager.NAMES[seat]
+	run.log_event("%s earns $%d on %s." % [who, n, RankSystem.short_label(rank)])
+
+func _fire_turn_action(seat: int, id: String) -> bool:
+	if not run.spend_action_for(seat, id):
+		return false
+	var fx: Dictionary = ActionFx.apply_turn(game, run, seat, id)
+	if bool(fx.get("refund", false)):
+		run.restore_action_for(seat, id)
+	var msg: String = str(fx.get("message", ""))
+	if msg != "":
+		_message(msg)
+		run.log_event(msg)
+	return bool(fx.get("ok", false))
+
 func _use_action(id: String) -> void:
 	var info: Dictionary = ActionDB.get_by_id(id)
 	var when: String = str(info.get("when", "turn"))
@@ -576,88 +612,14 @@ func _use_action(id: String) -> void:
 	if _busy or game.current_player != 0 or game.round_over:
 		_message("Actions are for your turn.")
 		return
-	if not run.spend_action(id):
-		return
-	match id:
-		"veto":
-			var vs: int = _next_opponent()
-			if _hostile_cancelled(vs, "veto"):
-				_refresh()
-				return
-			game.skip_seat = vs
-			_message("Veto — %s will be skipped." % RunManager.NAMES[game.skip_seat])
-		"filibuster":
-			var fs: int = _next_opponent()
-			if _hostile_cancelled(fs, "filibuster"):
-				_refresh()
-				return
-			game.must_pass_seat = fs
-			_message("Filibuster — %s must pass." % RunManager.NAMES[game.must_pass_seat])
-		"exec":
-			game.exec_order = true
-			_message("Executive Order — any rank of the required count.")
-		"leak":
-			game.peek_seat = _next_opponent()
-			_message("Leak — peeking %s." % RunManager.NAMES[game.peek_seat])
-		"tax":
-			_tax()
-		"rally":
-			_rally()
+	_fire_turn_action(0, id)
 	_refresh()
-
-func _hostile_cancelled(target: int, action_id: String) -> bool:
-	if target != 0:
-		return false
-	if not ActionDB.is_hostile(action_id):
-		return false
-	if run.consume_jsn(0):
-		_message("Just Say No — %s cancelled." % str(ActionDB.get_by_id(action_id).get("name", action_id)))
-		run.trade_log.append("Just Say No cancelled %s." % action_id)
-		return true
-	return false
-
-func _next_opponent() -> int:
-	var remain: Array = game.active_seats()
-	var idx: int = remain.find(0)
-	if idx < 0:
-		return int(remain[0]) if not remain.is_empty() else 1
-	return int(remain[(idx + 1) % remain.size()])
-
-func _tax() -> void:
-	var last: int = -1
-	var worst_n: int = -1
-	for s in game.active_seats():
-		if s == 0:
-			continue
-		var n: int = game.hand_of(s).size()
-		if n >= worst_n:
-			worst_n = n
-			last = s
-	if last < 0 or game.hand_of(last).is_empty():
-		_message("Tax fizzled — nobody to steal from.")
-		run.actions.append("tax")
-		return
-	if _hostile_cancelled(last, "tax"):
-		return
-	var oh: Array = game.hands[last]
-	var card: CardData = oh[run.rng.randi_range(0, oh.size() - 1)]
-	oh.erase(card)
-	game.hands[0].append(card)
-	Deck._sort_hand(game.hands[0])
-	_message("Taxed %s for %s." % [RunManager.NAMES[last], card.display_name()])
-
-func _rally() -> void:
-	for _i in range(2):
-		if not game.kitty.is_empty():
-			game.hands[0].append(game.kitty.pop_back())
-		else:
-			game.hands[0].append(CardData.new(3, _i % 4, true))
-	Deck._sort_hand(game.hands[0])
-	_message("Rally — two more cards.")
 
 func _end_round() -> void:
 	_busy = true
 	run.apply_payouts(game.finished)
+	run.ai_results_actions()
+	run.ai_shop_all()
 	_float_payouts()
 	_show_results()
 
@@ -667,7 +629,7 @@ func _float_payouts() -> void:
 		var seat: int = int(d["seat"])
 		var chip: Label = Label.new()
 		var hp_d: int = int(d["hp_delta"])
-		chip.text = ("%+d HP" % hp_d) + ("  +$%d" % int(d["gold"]) if seat == 0 and int(d["gold"]) > 0 else "")
+		chip.text = ("%+d HP" % hp_d) + ("  +$%d" % int(d["gold"]) if int(d["gold"]) > 0 else "")
 		chip.add_theme_font_size_override("font_size", 14)
 		chip.add_theme_color_override("font_color", Color(0.4, 1.0, 0.5) if hp_d >= 0 else Color(1.0, 0.4, 0.35))
 		_fly_layer.add_child(chip)
@@ -753,45 +715,26 @@ func _on_results_continued() -> void:
 func _on_results_action(id: String) -> void:
 	if not run.has_action(id):
 		return
-	var live: Array = run.living_finish()
 	if not run.spend_action(id):
 		return
-	match id:
-		"uprising":
-			if live.size() >= 3:
-				RoleTrade.swap_finish(run.last_finish, int(live[0]), int(live[live.size() - 1]))
-				run.trade_log.append("Uprising — President ↔ Asshole.")
-		"impeach":
-			if live.size() >= 4:
-				RoleTrade.swap_finish(run.last_finish, int(live[0]), int(live[1]))
-				run.trade_log.append("Impeach — President ↔ Vice-President.")
-		"coup":
-			if live.size() >= 3 and int(live[0]) != 0:
-				RoleTrade.swap_finish(run.last_finish, int(live[0]), 0)
-				run.trade_log.append("Coup — you seize the Presidency.")
-		"pardon":
-			run.cancelled_tribute_seats.append(0)
-			run.trade_log.append("Pardon — your outgoing tribute is waved.")
-		"just_say_no":
-			run.cancelled_tribute_seats.append(0)
-			run.trade_log.append("Just Say No — you refuse the tribute.")
-		"recess":
-			run.skip_tributes = true
-			run.trade_log.append("Recess — no tributes this deal.")
+	var line: String = run.apply_results_action(0, id)
+	if line != "":
+		run.log_event(line)
 	_show_results()
 
 func _adjust_pair(pair: Dictionary) -> void:
 	var g: int = int(pair["giver"])
 	var r: int = int(pair["receiver"])
 	var n: int = int(pair["count"])
-	if run.has_upgrade("oval") and r == 0:
-		n += run.count_upgrade("oval")
-	if run.has_enhancement("union") and (g == 0 or r == 0):
-		n = maxi(1, n - run.count_enhancement("union"))
+	if run.has_upgrade_of(r, "oval"):
+		n += run.count_upgrade_of(r, "oval")
+	var union_n: int = run.count_enhancement_of(g, "union") + run.count_enhancement_of(r, "union")
+	if union_n > 0:
+		n = maxi(1, n - union_n)
 	pair["count"] = n
 	var ret_n: int = n
-	if run.has_enhancement("wax") and r == 0:
-		ret_n = maxi(1, ret_n - run.count_enhancement("wax"))
+	if run.has_enhancement_of(r, "wax"):
+		ret_n = maxi(1, ret_n - run.count_enhancement_of(r, "wax"))
 	pair["return_count"] = ret_n
 
 func _resolve_tributes() -> void:
@@ -904,8 +847,9 @@ func _refresh_hud() -> void:
 		return
 	var role: String = RoleTrade.role_of(run.living_finish(), 0)
 	var role_bit: String = "  %s" % role if not run.living_finish().is_empty() else ""
-	_hud.text = "Round %d  Stake %d  HP %d/%d  Gold %d  Living %d%s" % [
-		run.round_n, run.stake(), int(run.hp[0]), run.max_hp, run.gold, run.living_seats().size(), role_bit]
+	var bind: String = run.rank_mod_short(0)
+	_hud.text = "Round %d  Stake %d  HP %d/%d  Gold %d  Living %d%s%s" % [
+		run.round_n, run.stake(), int(run.hp[0]), run.max_hp, run.gold, run.living_seats().size(), role_bit, bind]
 
 func _set_buttons() -> void:
 	var yours: bool = game.current_player == 0 and not game.round_over and not _busy and not _trade_waiting
@@ -921,6 +865,7 @@ func _refresh() -> void:
 	_card_size = Vector2(w, w * 1.4)
 	_sync_ais()
 	_sync_trick()
+	_sync_odds()
 	_sync_hand()
 	_rebuild_actions()
 	_set_buttons()
@@ -970,13 +915,13 @@ func _sync_ais() -> void:
 		if run.is_alive(seat):
 			badge.text = str(game.hand_of(seat).size())
 			badge.add_theme_font_size_override("font_size", 22)
-			hp.text = "HP %d" % int(run.hp[seat])
+			hp.text = "HP %d  $%d" % [int(run.hp[seat]), run.gold_of(seat)]
 		else:
 			badge.text = "OUT"
 			badge.add_theme_font_size_override("font_size", 12)
 			hp.text = ""
 		var role: String = RoleTrade.short_role(RoleTrade.role_of(run.living_finish(), seat))
-		last.text = "%s  %s" % [role, str(game.last_play_label.get(seat, "—"))]
+		last.text = "%s  %s%s" % [role, str(game.last_play_label.get(seat, "—")), run.rank_mod_short(seat)]
 		if game.peek_seat == seat:
 			var bits: Array[String] = []
 			for c2 in game.hand_of(seat):
@@ -986,6 +931,11 @@ func _sync_ais() -> void:
 		else:
 			peek.visible = false
 		whip.visible = run.has_upgrade("whip") and run.is_alive(seat) and (not run.whip_used or run.has_upgrade("majority"))
+
+func _sync_odds() -> void:
+	if _odds == null:
+		return
+	_odds.text = OddsHelper.hud_text(game, run, 0)
 
 func _whip(seat: int) -> void:
 	if run.whip_used and not run.has_upgrade("majority"):
