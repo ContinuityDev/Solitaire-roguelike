@@ -54,12 +54,12 @@ static func short_label_for_power(p: int) -> String:
 	return str(p)
 
 ## Face vs effective follow value. `power_bonus` is the seat-scoped +power bind
-## (Strong Fives, Ace Authority, …). Promotions/Forge are the card's origin_rank.
-## `{shown, small, buffed}` — `shown` is the true value; `small` is the printed
-## rank when it differs, so the buff is obvious on a phone.
+## (Strong Fives, Ace Authority, …). Promotions/Forge keep `origin_rank`.
+## `{printed, shown, buffed}` — `printed` is the source rank (always drawn in
+## suit color); `shown` is the true follow value (blue badge when buffed).
 static func buff_display(card: CardData, power_bonus: int = 0) -> Dictionary:
 	if card == null:
-		return {"shown": "", "small": "", "buffed": false, "power": 0}
+		return {"shown": "", "printed": "", "small": "", "buffed": false, "power": 0}
 	var face: int = card.rank
 	var origin: int = card.origin_rank if card.origin_rank > 0 else face
 	var power: int = president_power(face) + maxi(0, power_bonus)
@@ -67,10 +67,6 @@ static func buff_display(card: CardData, power_bonus: int = 0) -> Dictionary:
 	var face_lab: String = short_label(face)
 	var origin_lab: String = short_label(origin)
 	var buffed: bool = power > president_power(origin)
-	var small: String = ""
-	if buffed:
-		if shown != face_lab:
-			small = face_lab
-		elif origin_lab != shown:
-			small = origin_lab
-	return {"shown": shown, "small": small, "buffed": buffed, "power": power}
+	var printed: String = origin_lab if origin != face else face_lab
+	var small: String = printed if buffed and printed != shown else ""
+	return {"shown": shown, "printed": printed, "small": small, "buffed": buffed, "power": power}

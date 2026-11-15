@@ -77,7 +77,7 @@ Shop **rank binds** (or an AI specialty) attach an effect to one rank for **one 
 - `power` — +1 follow power when that seat plays the rank (your 5s can equal a 6; theirs do not)
 - `always_legal` — that rank is always a legal follow of the matching count for that seat (Ace Privilege can follow a bomb)
 
-When a card’s **effective follow value is higher than its printed rank**, the face shows that true value **in blue** instead of the printed rank. Unbuffed cards keep red/black. This fires for seat-scoped `power` binds (Strong Fives → blue 6, Ace Authority → blue 2, Kingmaker → blue A, Heavier Bombs → blue 2+), **Incumbent** / **Rally** promotions (3→4 reads as a blue 4), and **Forge Bomb** (the new 2 is blue). `gold_play` and `always_legal` do not recolor — they are not a higher value.
+When a card’s **effective follow value is higher than its printed rank**, the face keeps the **printed rank in red/black** and adds the true value **in blue** (`5 → 6`, with a blue badge). Unbuffed cards are unchanged. This fires for seat-scoped `power` binds (Strong Fives: 5 + blue 6; Ace Authority: A + blue 2; Kingmaker: K + blue A; Heavier Bombs: 2 + blue 2+), **Incumbent** / **Rally** promotions (3 + blue 4), and **Forge Bomb** (printed origin + blue 2). `gold_play` and `always_legal` do not recolor — they are not a higher value.
 
 ## Run it
 

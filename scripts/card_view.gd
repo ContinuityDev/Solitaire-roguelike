@@ -19,10 +19,9 @@ var face_forced_down: bool = false
 var display_size: Vector2 = Vector2(W, H)
 var _last_processed_msec: int = 0
 var _last_tap_msec: int = 0
-## Effective follow value. Set from RankSystem.buff_display (power binds,
-## Incumbent/Rally promotions, Forge). Unbuffed cards leave these empty.
+## Dual rank: printed (suit color) + effective (blue badge) when buffed.
 var shown_value: String = ""
-var printed_hint: String = ""
+var printed_label: String = ""
 var value_buffed: bool = false
 
 const BUFF_BLUE: Color = Color(0.08, 0.42, 0.98)
@@ -47,12 +46,12 @@ func set_card(p_card: CardData, power_bonus: int = 0) -> void:
 func _sync_value(power_bonus: int = 0) -> void:
 	if card == null:
 		shown_value = ""
-		printed_hint = ""
+		printed_label = ""
 		value_buffed = false
 		return
 	var d: Dictionary = RankSystem.buff_display(card, power_bonus)
 	shown_value = str(d.get("shown", ""))
-	printed_hint = str(d.get("small", ""))
+	printed_label = str(d.get("printed", RankSystem.short_label(card.rank)))
 	value_buffed = bool(d.get("buffed", false))
 
 func _gui_input(event: InputEvent) -> void:
@@ -118,14 +117,20 @@ func _draw() -> void:
 		suit_col.a = 0.38
 	var s: float = clampf(size.x / W, 0.5, 1.25)
 	var font: Font = get_theme_default_font()
-	var label: String = shown_value if shown_value != "" else RankSystem.short_label(card.rank)
-	var col: Color = BUFF_BLUE if value_buffed else suit_col
-	if dimmed and value_buffed:
-		col.a = 0.55
-	var rank_size: int = maxi(16, int((24.0 if value_buffed else 22.0) * s))
-	if label.length() > 1:
+	var face_lab: String = printed_label if printed_label != "" else RankSystem.short_label(card.rank)
+	var rank_size: int = maxi(16, int(22.0 * s))
+	if face_lab.length() > 1:
 		rank_size = maxi(14, int(18.0 * s))
-	draw_string(font, Vector2(inner.position.x + 3, inner.position.y + 18.0 * s), label, HORIZONTAL_ALIGNMENT_LEFT, -1, rank_size, col)
+	draw_string(font, Vector2(inner.position.x + 3, inner.position.y + 18.0 * s), face_lab, HORIZONTAL_ALIGNMENT_LEFT, -1, rank_size, suit_col)
+	if value_buffed and shown_value != "" and shown_value != face_lab:
+		if size.x >= 50.0:
+			var arrow_size: int = maxi(11, int(14.0 * s))
+			var face_w: float = font.get_string_size(face_lab, HORIZONTAL_ALIGNMENT_LEFT, -1, rank_size).x
+			var arrow_col: Color = BUFF_BLUE
+			if dimmed:
+				arrow_col.a = 0.55
+			draw_string(font, Vector2(inner.position.x + 3.0 + face_w, inner.position.y + 17.0 * s), "→", HORIZONTAL_ALIGNMENT_LEFT, -1, arrow_size, arrow_col)
+		_draw_buff_badge(font, rect, s, shown_value, dimmed)
 	_draw_suit(inner.position + Vector2(12.0 * s, 34.0 * s), 8.0 * s, suit_col, card.suit)
 	_draw_suit(inner.position + Vector2(inner.size.x * 0.5, inner.size.y * 0.58), 16.0 * s, suit_col, card.suit)
 	if RankSystem.is_bomb(card.rank):
@@ -134,6 +139,23 @@ func _draw() -> void:
 		draw_string(font, Vector2(ribbon.position.x, ribbon.end.y - 3), "BOMB", HORIZONTAL_ALIGNMENT_CENTER, ribbon.size.x, int(10.0 * s), Color(1, 0.92, 0.55))
 	if card.enhancement == "steel":
 		draw_string(font, Vector2(rect.position.x + 2, rect.position.y + rect.size.y * 0.72), "STEEL", HORIZONTAL_ALIGNMENT_CENTER, rect.size.x - 4.0, int(9.0 * s), Color(0.55, 0.70, 0.95))
+
+func _draw_buff_badge(font: Font, rect: Rect2, s: float, label: String, is_dimmed: bool) -> void:
+	var badge_size: int = maxi(13, int(16.0 * s))
+	if label.length() > 1:
+		badge_size = maxi(11, int(13.0 * s))
+	var tw: float = font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, badge_size).x
+	var pad: float = maxf(3.0, 4.0 * s)
+	var bw: float = tw + pad * 2.0
+	var bh: float = float(badge_size) + pad * 1.15
+	var bx: float = rect.end.x - bw - 4.0
+	var by: float = rect.position.y + 3.0
+	var bsb: StyleBoxFlat = StyleBoxFlat.new()
+	bsb.bg_color = Color(0.07, 0.36, 0.95, 0.55 if is_dimmed else 0.96)
+	bsb.set_corner_radius_all(maxi(4, int(6.0 * s)))
+	draw_style_box(bsb, Rect2(bx, by, bw, bh))
+	var ink: Color = Color(1.0, 1.0, 1.0, 0.7 if is_dimmed else 1.0)
+	draw_string(font, Vector2(bx, by + bh - pad * 0.3), label, HORIZONTAL_ALIGNMENT_CENTER, bw, badge_size, ink)
 
 func _draw_back(sb: StyleBoxFlat, rect: Rect2) -> void:
 	sb.bg_color = Color(0.10, 0.18, 0.36)
