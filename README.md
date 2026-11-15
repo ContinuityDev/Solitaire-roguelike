@@ -9,11 +9,12 @@ Play in the browser once GitHub Pages is on: https://continuitydev.github.io/Sol
 - 52-card deck, six seats. Rank order: **3 lowest … King, Ace, then 2s (bombs)**.
 - Play **N of a kind** (single, pair, trips, four). Follow with the same count, equal or higher rank. Pass if you cannot or will not.
 - When everyone else passes, the last player to play **leads** anything.
+- **You lead round 1.** Later rounds, last round’s 1st place leads if they are still living; otherwise you do.
 - First empty hand is 1st (President). Play continues until everyone is placed.
 - 0 HP seats sit out the next deal.
 
 ### Your turn
-Tap cards of **one rank**, then **Play**. Or **Pass** (not on lead). Action cards in your tray fire on your turn.
+**Yellow cards** are legal. Tap one to auto-select the required count (one on lead — tap extras of that rank to add copies; on follow, exactly the trick count). Then **Play**, or **double-tap** a yellow card to play immediately. **Pass** is always legal except on lead. A **YOUR TURN** banner means Play is live — if it is someone else’s turn, wait for the fly-in. Action cards in your tray fire on your turn. Opponents show a fan of card-backs and a large count of cards left.
 
 ## HP and gold
 

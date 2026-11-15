@@ -25,7 +25,7 @@ var peek_seat: int = -1
 var round_over: bool = false
 var history: Array = []
 
-func setup(p_living: Array, rng: RandomNumberGenerator, packed: int = 0, favorite_rank: int = 0, extra_cards: int = 0) -> void:
+func setup(p_living: Array, rng: RandomNumberGenerator, packed: int = 0, favorite_rank: int = 0, extra_cards: int = 0, lead_seat: int = 0) -> void:
 	living = p_living.duplicate()
 	finished.clear()
 	last_play_label.clear()
@@ -44,19 +44,26 @@ func setup(p_living: Array, rng: RandomNumberGenerator, packed: int = 0, favorit
 	hands = dealt["hands"]
 	kitty = dealt["kitty"]
 	current_player = int(living[0])
-	# Lowest 3 of clubs (or lowest 3) leads.
-	var best_seat: int = current_player
-	var best_key: int = 99
-	for seat in living:
-		for c in hands[seat]:
-			var card: CardData = c
-			if card.rank != 3:
-				continue
-			var key: int = card.suit
-			if key < best_key:
-				best_key = key
-				best_seat = int(seat)
-	current_player = best_seat
+	if living.has(lead_seat):
+		current_player = lead_seat
+	elif living.has(0):
+		current_player = 0
+
+func rank_is_legal(seat: int, rank: int) -> bool:
+	var n: int = count_of_rank(seat, rank)
+	if n <= 0:
+		return false
+	if lead:
+		return true
+	if n < trick_count:
+		return false
+	return is_legal_combo({"rank": rank, "count": trick_count})
+
+## How many cards of a legal rank a tap should select.
+func auto_select_count() -> int:
+	if lead:
+		return 1
+	return trick_count
 
 func active_seats() -> Array:
 	var out: Array = []

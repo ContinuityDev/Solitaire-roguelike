@@ -1,9 +1,10 @@
 class_name CardView
 extends Control
 
-## Code-drawn playing card. Presidential cream faces, column-back.
+## Code-drawn playing card. Cream faces, column-back, yellow legal highlight.
 
 signal press_started(view: CardView, global_pos: Vector2)
+signal double_pressed(view: CardView)
 
 const W: float = 70.0
 const H: float = 98.0
@@ -12,10 +13,12 @@ var card: CardData = null
 var placeholder_text: String = ""
 var selected: bool = false
 var dimmed: bool = false
+var highlighted: bool = false
 var face_forced_down: bool = false
 
 var display_size: Vector2 = Vector2(W, H)
 var _last_processed_msec: int = 0
+var _last_tap_msec: int = 0
 
 func _init(p_card: CardData = null, p_size: Vector2 = Vector2(W, H)) -> void:
 	card = p_card
@@ -46,10 +49,17 @@ func _gui_input(event: InputEvent) -> void:
 	if now - _last_processed_msec < 80:
 		return
 	_last_processed_msec = now
-	press_started.emit(self, get_global_mouse_position())
+	if now - _last_tap_msec < 400:
+		_last_tap_msec = 0
+		double_pressed.emit(self)
+	else:
+		_last_tap_msec = now
+		press_started.emit(self, get_global_mouse_position())
 
 func _draw() -> void:
-	var rect: Rect2 = Rect2(Vector2.ZERO, size)
+	var rect: Rect2 = Rect2(Vector2(2, 3), size - Vector2(4, 6))
+	# Drop shadow.
+	draw_rect(Rect2(rect.position + Vector2(2, 3), rect.size), Color(0, 0, 0, 0.35), true, -1.0, true)
 	var sb: StyleBoxFlat = StyleBoxFlat.new()
 	sb.set_corner_radius_all(8)
 	sb.set_border_width_all(2)
@@ -65,24 +75,37 @@ func _draw() -> void:
 	if not show_face:
 		_draw_back(sb, rect)
 		return
-	sb.bg_color = Color(0.97, 0.95, 0.90)
+	sb.bg_color = Color(0.86, 0.82, 0.74)
 	if selected:
-		sb.border_color = Color(0.95, 0.75, 0.15)
+		sb.border_color = Color(1.0, 0.78, 0.08)
 		sb.set_border_width_all(4)
+	elif highlighted:
+		sb.border_color = Color(0.98, 0.88, 0.12)
+		sb.set_border_width_all(3)
+		sb.bg_color = Color(0.92, 0.82, 0.28)
 	else:
-		sb.border_color = Color(0.18, 0.18, 0.22)
+		sb.border_color = Color(0.16, 0.16, 0.20)
+	if dimmed:
+		sb.bg_color = sb.bg_color.lerp(Color(0.45, 0.45, 0.48), 0.45)
 	draw_style_box(sb, rect)
+	var inner: Rect2 = Rect2(rect.position + Vector2(5, 5), rect.size - Vector2(10, 10))
+	var inner_col: Color = Color(1.0, 0.98, 0.78) if (highlighted or selected) else Color(0.99, 0.98, 0.94)
+	if dimmed:
+		inner_col = Color(0.86, 0.86, 0.88)
+	draw_rect(inner, inner_col, true, -1.0, true)
 	var col: Color = Color(0.72, 0.10, 0.12) if card.is_red() else Color(0.08, 0.10, 0.16)
 	if dimmed:
-		col.a = 0.4
-	var s: float = clampf(size.x / W, 0.5, 1.2)
+		col.a = 0.38
+	var s: float = clampf(size.x / W, 0.5, 1.25)
 	var font: Font = get_theme_default_font()
 	var label: String = RankSystem.short_label(card.rank)
-	draw_string(font, Vector2(5, 20.0 * s), label, HORIZONTAL_ALIGNMENT_LEFT, -1, int(18.0 * s), col)
-	_draw_suit(Vector2(14.0 * s, 34.0 * s), 7.0 * s, col, card.suit)
-	_draw_suit(Vector2(size.x * 0.5, size.y * 0.58), 16.0 * s, col, card.suit)
+	draw_string(font, Vector2(inner.position.x + 3, inner.position.y + 18.0 * s), label, HORIZONTAL_ALIGNMENT_LEFT, -1, int(22.0 * s), col)
+	_draw_suit(inner.position + Vector2(12.0 * s, 34.0 * s), 8.0 * s, col, card.suit)
+	_draw_suit(inner.position + Vector2(inner.size.x * 0.5, inner.size.y * 0.58), 16.0 * s, col, card.suit)
 	if RankSystem.is_bomb(card.rank):
-		draw_string(font, Vector2(3, size.y - 8), "BOMB", HORIZONTAL_ALIGNMENT_CENTER, size.x - 6.0, int(10.0 * s), Color(0.75, 0.12, 0.12))
+		var ribbon: Rect2 = Rect2(rect.position.x, rect.end.y - 16.0 * s, rect.size.x, 14.0 * s)
+		draw_rect(ribbon, Color(0.72, 0.10, 0.12, 0.92), true)
+		draw_string(font, Vector2(ribbon.position.x, ribbon.end.y - 3), "BOMB", HORIZONTAL_ALIGNMENT_CENTER, ribbon.size.x, int(10.0 * s), Color(1, 0.92, 0.55))
 
 func _draw_back(sb: StyleBoxFlat, rect: Rect2) -> void:
 	sb.bg_color = Color(0.10, 0.18, 0.36)
@@ -90,15 +113,14 @@ func _draw_back(sb: StyleBoxFlat, rect: Rect2) -> void:
 	sb.set_border_width_all(3)
 	draw_style_box(sb, rect)
 	var gold: Color = Color(0.85, 0.70, 0.28, 0.9)
-	# Four columns (White House-ish).
-	var cx: float = size.x * 0.5
-	var base_y: float = size.y * 0.72
-	var top_y: float = size.y * 0.28
-	draw_rect(Rect2(size.x * 0.18, top_y, size.x * 0.64, 8), gold)
+	var cx: float = rect.position.x + rect.size.x * 0.5
+	var base_y: float = rect.position.y + rect.size.y * 0.72
+	var top_y: float = rect.position.y + rect.size.y * 0.28
+	draw_rect(Rect2(rect.position.x + rect.size.x * 0.18, top_y, rect.size.x * 0.64, 8), gold)
 	for i in range(4):
-		var x: float = size.x * 0.24 + float(i) * size.x * 0.14
+		var x: float = rect.position.x + rect.size.x * 0.24 + float(i) * rect.size.x * 0.14
 		draw_rect(Rect2(x, top_y + 8, 7, base_y - top_y - 8), gold)
-	draw_rect(Rect2(size.x * 0.16, base_y, size.x * 0.68, 7), gold)
+	draw_rect(Rect2(rect.position.x + rect.size.x * 0.16, base_y, rect.size.x * 0.68, 7), gold)
 	draw_circle(Vector2(cx, top_y - 4), 4, gold)
 
 func _draw_suit(center: Vector2, r: float, col: Color, suit: int) -> void:
