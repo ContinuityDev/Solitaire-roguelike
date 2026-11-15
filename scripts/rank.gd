@@ -2,9 +2,12 @@ class_name RankSystem
 extends RefCounted
 
 ## Standard French ranks. President power is 3-low through Ace, with 2s
-## sitting above Ace as the bomb rank.
+## sitting above Ace as the bomb rank. Rank 0 is a Joker (round-ender).
+
+const JOKER: int = 0
 
 const NAMES: Dictionary = {
+	0: "Joker",
 	1: "Ace",
 	2: "Two",
 	11: "Jack",
@@ -13,11 +16,15 @@ const NAMES: Dictionary = {
 }
 
 const SHORT: Dictionary = {
+	0: "Jk",
 	1: "A",
 	11: "J",
 	12: "Q",
 	13: "K",
 }
+
+static func is_joker(rank: int) -> bool:
+	return rank == JOKER
 
 static func short_label(rank: int) -> String:
 	if SHORT.has(rank):
@@ -30,7 +37,10 @@ static func full_name(rank: int) -> String:
 	return str(rank)
 
 ## President shedding power. 3 is weakest, Ace is high, 2 is the bomb.
+## Jokers are not a follow rank (they end the round); sort them last.
 static func president_power(rank: int) -> int:
+	if is_joker(rank):
+		return 100
 	if rank == 2:
 		return 15
 	if rank == 1:
@@ -39,6 +49,16 @@ static func president_power(rank: int) -> int:
 
 static func is_bomb(rank: int) -> bool:
 	return rank == 2
+
+static func rank_from_power(p: int) -> int:
+	if p >= 15:
+		return 2
+	if p == 14:
+		return 1
+	return clampi(p, 3, 13)
+
+static func copies_in_deck(rank: int) -> int:
+	return 2 if is_joker(rank) else 4
 
 ## Map a follow-power number back to a face label. 16+ is a bomb with extra
 ## weight (Heavier Bombs) — there is no rank above 2, so that reads "2+".

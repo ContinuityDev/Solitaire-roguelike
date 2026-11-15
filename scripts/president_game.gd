@@ -13,7 +13,9 @@ var living: Array = [] # seats still in the RUN (HP > 0)
 var finished: Array = [] # seats that emptied this round, in order
 var current_player: int = 0
 var lead: bool = true
-var trick_rank: int = 0
+var trick_rank: int = 0 ## effective follow rank (blue 6 if a 5 played as 6)
+var trick_printed: int = 0 ## face rank of the cards that hit the table
+var trick_power: int = 0 ## numeric follow power; 0 = no trick
 var trick_count: int = 0
 var trick_player: int = -1
 var passes: int = 0
@@ -38,6 +40,8 @@ func setup(p_living: Array, rng: RandomNumberGenerator, packed: int = 0, favorit
 	round_over = false
 	lead = true
 	trick_rank = 0
+	trick_printed = 0
+	trick_power = 0
 	trick_count = 0
 	trick_player = -1
 	passes = 0
@@ -60,6 +64,8 @@ func rank_is_legal(seat: int, rank: int) -> bool:
 	var n: int = count_of_rank(seat, rank)
 	if n <= 0:
 		return false
+	if RankSystem.is_joker(rank):
+		return true
 	if lead:
 		return true
 	if n < trick_count:
@@ -71,6 +77,23 @@ func auto_select_count() -> int:
 	if lead:
 		return 1
 	return trick_count
+
+func auto_select_count_for(rank: int) -> int:
+	if RankSystem.is_joker(rank):
+		return 1
+	return auto_select_count()
+
+func trick_need_power() -> int:
+	if trick_power > 0:
+		return trick_power
+	if trick_rank <= 0:
+		return 0
+	return RankSystem.president_power(trick_rank)
+
+func trick_follow_label() -> String:
+	if trick_power > 0:
+		return RankSystem.short_label_for_power(trick_power)
+	return RankSystem.short_label(trick_rank)
 
 func active_seats() -> Array:
 	var out: Array = []
@@ -115,6 +138,8 @@ func is_always_legal_rank(seat: int, rank: int) -> bool:
 func is_legal_combo(combo: Dictionary, seat: int = -1) -> bool:
 	var rank: int = int(combo.get("rank", 0))
 	var count: int = int(combo.get("count", 0))
+	if RankSystem.is_joker(rank):
+		return count == 1
 	if rank < 1 or rank > 13 or count < 1:
 		return false
 	if seat < 0:
@@ -127,7 +152,7 @@ func is_legal_combo(combo: Dictionary, seat: int = -1) -> bool:
 		return true
 	if is_always_legal_rank(seat, rank):
 		return true
-	return play_power(seat, rank) >= RankSystem.president_power(trick_rank)
+	return play_power(seat, rank) >= trick_need_power()
 
 func legal_combos(seat: int) -> Array:
 	var out: Array = []
@@ -162,19 +187,52 @@ func play(seat: int, combo: Dictionary) -> Dictionary:
 	_take_cards(seat, rank, count)
 	exec_order = false
 	must_pass_seat = -1
-	trick_rank = rank
-	trick_count = count
+	trick_printed = rank
 	trick_player = seat
 	lead = false
 	passes = 0
-	var label: String = "%dx %s" % [count, RankSystem.short_label(rank)]
+	if RankSystem.is_joker(rank):
+		trick_count = 1
+		trick_power = 99
+		trick_rank = RankSystem.JOKER
+		var jlabel: String = "JOKER — round over"
+		last_play_label[seat] = jlabel
+		history.append({"seat": seat, "rank": rank, "count": 1, "joker": true})
+		var rest: Array = hand_of(seat).duplicate()
+		for c in rest:
+			kitty.append(c)
+		hands[seat].clear()
+		if not finished.has(seat):
+			finished.append(seat)
+		_resolve_joker_round()
+		return {"ok": true, "label": jlabel, "finished": true, "joker": true}
+	trick_count = count
+	trick_power = play_power(seat, rank)
+	trick_rank = RankSystem.rank_from_power(trick_power)
+	var label: String = "%dx %s" % [count, RankSystem.short_label_for_power(trick_power)]
 	last_play_label[seat] = label
-	history.append({"seat": seat, "rank": rank, "count": count})
+	history.append({"seat": seat, "rank": rank, "count": count, "power": trick_power})
 	if hand_of(seat).is_empty() and not finished.has(seat):
 		finished.append(seat)
 		last_play_label[seat] = "OUT %d%s" % [finished.size(), _ord(finished.size())]
 	_advance_after_play()
 	return {"ok": true, "label": label, "finished": finished.has(seat)}
+
+func _resolve_joker_round() -> void:
+	var rest: Array = []
+	for s in living:
+		if not finished.has(int(s)):
+			rest.append(int(s))
+	rest.sort_custom(func(a: int, b: int) -> bool:
+		var na: int = hand_of(a).size()
+		var nb: int = hand_of(b).size()
+		if na == nb:
+			return a < b
+		return na < nb
+	)
+	for s2 in rest:
+		finished.append(int(s2))
+	round_over = true
 
 func pass_turn(seat: int) -> Dictionary:
 	if round_over or seat != current_player:
@@ -204,6 +262,8 @@ func _advance_after_pass() -> void:
 	if passes >= remain.size() - 1 and trick_player >= 0:
 		lead = true
 		trick_rank = 0
+		trick_printed = 0
+		trick_power = 0
 		trick_count = 0
 		passes = 0
 		current_player = trick_player
@@ -266,6 +326,8 @@ func pack_public() -> Dictionary:
 		"current_player": current_player,
 		"lead": lead,
 		"trick_rank": trick_rank,
+		"trick_printed": trick_printed,
+		"trick_power": trick_power,
 		"trick_count": trick_count,
 		"trick_player": trick_player,
 		"passes": passes,
@@ -292,6 +354,8 @@ func apply_replica(d: Dictionary, my_seat: int, my_hand: Array) -> void:
 	current_player = int(d.get("current_player", 0))
 	lead = bool(d.get("lead", true))
 	trick_rank = int(d.get("trick_rank", 0))
+	trick_printed = int(d.get("trick_printed", trick_rank))
+	trick_power = int(d.get("trick_power", 0))
 	trick_count = int(d.get("trick_count", 0))
 	trick_player = int(d.get("trick_player", -1))
 	passes = int(d.get("passes", 0))

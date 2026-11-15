@@ -108,6 +108,11 @@ func _draw() -> void:
 		sb.bg_color = sb.bg_color.lerp(Color(0.45, 0.45, 0.48), 0.45)
 	draw_style_box(sb, rect)
 	var inner: Rect2 = Rect2(rect.position + Vector2(5, 5), rect.size - Vector2(10, 10))
+	var s: float = clampf(size.x / W, 0.5, 1.25)
+	var font: Font = get_theme_default_font()
+	if RankSystem.is_joker(card.rank):
+		_draw_joker(font, rect, inner, s, dimmed)
+		return
 	var inner_col: Color = Color(1.0, 0.98, 0.78) if (highlighted or selected) else Color(0.99, 0.98, 0.94)
 	if dimmed:
 		inner_col = Color(0.86, 0.86, 0.88)
@@ -115,8 +120,6 @@ func _draw() -> void:
 	var suit_col: Color = Color(0.72, 0.10, 0.12) if card.is_red() else Color(0.08, 0.10, 0.16)
 	if dimmed:
 		suit_col.a = 0.38
-	var s: float = clampf(size.x / W, 0.5, 1.25)
-	var font: Font = get_theme_default_font()
 	var face_lab: String = printed_label if printed_label != "" else RankSystem.short_label(card.rank)
 	var rank_size: int = maxi(16, int(22.0 * s))
 	if face_lab.length() > 1:
@@ -139,6 +142,29 @@ func _draw() -> void:
 		draw_string(font, Vector2(ribbon.position.x, ribbon.end.y - 3), "BOMB", HORIZONTAL_ALIGNMENT_CENTER, ribbon.size.x, int(10.0 * s), Color(1, 0.92, 0.55))
 	if card.enhancement == "steel":
 		draw_string(font, Vector2(rect.position.x + 2, rect.position.y + rect.size.y * 0.72), "STEEL", HORIZONTAL_ALIGNMENT_CENTER, rect.size.x - 4.0, int(9.0 * s), Color(0.55, 0.70, 0.95))
+
+func _draw_joker(font: Font, rect: Rect2, inner: Rect2, s: float, is_dimmed: bool) -> void:
+	var bg: Color = Color(0.18, 0.08, 0.28) if card.is_red() else Color(0.10, 0.10, 0.16)
+	if highlighted or selected:
+		bg = bg.lightened(0.12)
+	if is_dimmed:
+		bg = bg.lerp(Color(0.4, 0.4, 0.42), 0.4)
+	draw_rect(inner, bg, true, -1.0, true)
+	var ink: Color = Color(0.98, 0.82, 0.28) if card.is_red() else Color(0.88, 0.88, 0.92)
+	if is_dimmed:
+		ink.a = 0.5
+	var cx: Vector2 = inner.position + inner.size * 0.5
+	var r: float = 10.0 * s
+	var star: PackedVector2Array = PackedVector2Array()
+	for i in range(10):
+		var a: float = -PI * 0.5 + float(i) * PI / 5.0
+		var rad: float = r if i % 2 == 0 else r * 0.42
+		star.append(cx + Vector2(cos(a) * rad, sin(a) * rad))
+	draw_colored_polygon(star, ink)
+	draw_string(font, Vector2(rect.position.x, inner.position.y + 16.0 * s), "Jk", HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, maxi(14, int(18.0 * s)), ink)
+	var ribbon: Rect2 = Rect2(rect.position.x, rect.end.y - 16.0 * s, rect.size.x, 14.0 * s)
+	draw_rect(ribbon, Color(0.55, 0.22, 0.72, 0.95), true)
+	draw_string(font, Vector2(ribbon.position.x, ribbon.end.y - 3), "JOKER", HORIZONTAL_ALIGNMENT_CENTER, ribbon.size.x, int(10.0 * s), Color(1, 0.92, 0.55))
 
 func _draw_buff_badge(font: Font, rect: Rect2, s: float, label: String, is_dimmed: bool) -> void:
 	var badge_size: int = maxi(13, int(16.0 * s))

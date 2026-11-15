@@ -37,6 +37,7 @@ var role_streak_len: Array = [] # consecutive count per seat
 var shop_offers: Array = []
 var shop_rerolls: int = 0
 var shop_seat: int = 0
+var shop_phase: bool = false ## AIs may buy only while the desk is open
 var run_over: bool = false
 var run_won: bool = false
 var lobby: LobbyConfig = null
@@ -183,6 +184,7 @@ func start_new_run(config = null) -> void:
 	shop_offers.clear()
 	shop_rerolls = 0
 	shop_seat = 0
+	shop_phase = false
 	run_over = false
 	run_won = false
 	changed.emit()
@@ -471,8 +473,15 @@ func buy_action(id: String, price: int) -> bool:
 func buy_enhancement(id: String, price: int) -> bool:
 	return buy_enhancement_for(shop_seat, id, price)
 
+func _seat_may_buy(seat: int) -> bool:
+	if is_human(seat):
+		return true
+	return shop_phase
+
 func buy_upgrade_for(seat: int, id: String, price: int) -> bool:
 	_ensure_seat_arrays()
+	if not _seat_may_buy(seat):
+		return false
 	if gold_of(seat) < price:
 		return false
 	seat_gold[seat] = gold_of(seat) - price
@@ -497,6 +506,8 @@ func buy_upgrade_for(seat: int, id: String, price: int) -> bool:
 
 func buy_action_for(seat: int, id: String, price: int) -> bool:
 	_ensure_seat_arrays()
+	if not _seat_may_buy(seat):
+		return false
 	if gold_of(seat) < price:
 		return false
 	seat_gold[seat] = gold_of(seat) - price
@@ -506,6 +517,8 @@ func buy_action_for(seat: int, id: String, price: int) -> bool:
 
 func buy_enhancement_for(seat: int, id: String, price: int) -> bool:
 	_ensure_seat_arrays()
+	if not _seat_may_buy(seat):
+		return false
 	if gold_of(seat) < price:
 		return false
 	seat_gold[seat] = gold_of(seat) - price
@@ -546,7 +559,15 @@ func next_round() -> void:
 		return
 	round_n += 1
 	whip_used = false
+	close_shop_phase()
 	changed.emit()
+
+func open_shop_phase() -> Array:
+	shop_phase = true
+	return ai_shop_all()
+
+func close_shop_phase() -> void:
+	shop_phase = false
 
 func reset_tribute_flags() -> void:
 	cancelled_tribute_seats.clear()
@@ -658,6 +679,8 @@ func apply_results_action(seat: int, id: String) -> String:
 
 func ai_shop_all() -> Array:
 	var logs: Array = []
+	if not shop_phase:
+		return logs
 	for seat in range(SEATS):
 		if not is_alive(seat) or is_human(seat):
 			continue
@@ -740,6 +763,7 @@ func pack_public() -> Dictionary:
 		"shop_offers": shop_offers.duplicate(true),
 		"shop_rerolls": shop_rerolls,
 		"shop_seat": shop_seat,
+		"shop_phase": shop_phase,
 		"run_over": run_over,
 		"run_won": run_won,
 	}
@@ -778,6 +802,7 @@ func apply_public(d: Dictionary) -> void:
 			shop_offers.append((o as Dictionary).duplicate())
 	shop_rerolls = int(d.get("shop_rerolls", 0))
 	shop_seat = int(d.get("shop_seat", 0))
+	shop_phase = bool(d.get("shop_phase", false))
 	run_over = bool(d.get("run_over", false))
 	run_won = bool(d.get("run_won", false))
 	if lobby == null:

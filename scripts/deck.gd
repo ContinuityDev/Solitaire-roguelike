@@ -1,13 +1,15 @@
 class_name Deck
 extends RefCounted
 
-## Standard 52-card deck plus a weighted deal for shop upgrades.
+## Standard 54-card deck (52 + 2 jokers) plus a weighted deal for shop upgrades.
 
 static func build_standard() -> Array:
 	var cards: Array = []
 	for suit in range(4):
 		for rank in range(1, 14):
 			cards.append(CardData.new(rank, suit, true))
+	cards.append(CardData.new(RankSystem.JOKER, 0, true))
+	cards.append(CardData.new(RankSystem.JOKER, 1, true))
 	return cards
 
 static func shuffle(cards: Array, rng: RandomNumberGenerator) -> void:

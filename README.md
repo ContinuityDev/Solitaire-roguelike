@@ -18,8 +18,9 @@ Last living **human** wins the run. If every human hits 0 HP, the cabinet outlas
 
 ## How a round works
 
-- 52-card deck, six seats. Rank order: **3 lowest … King, Ace, then 2s (bombs)**.
-- Play **N of a kind** (single, pair, trips, four). Follow with the same count, equal or higher rank. Pass if you cannot or will not.
+- **54-card deck** (52 + **2 jokers**), six seats. Rank order: **3 lowest … King, Ace, then 2s (bombs)**.
+- Play **N of a kind** (single, pair, trips, four). Follow with the same count, equal or **higher effective rank**. A blue value is the trick’s true rank: if someone plays a 5 that reads as a blue 6, the trick is a 6 — a printed 5 cannot follow. Pass if you cannot or will not.
+- **Joker (instant round-ender):** a single joker is always legal on your turn (lead or follow, any count). Playing it dumps the rest of that seat’s hand to the kitty, that seat **finishes immediately** (President if they are first out), and the round is over. Remaining seats are ranked by **fewest cards left** (seat index breaks ties). Jokers have a purple **Jk / JOKER** face (red or black star).
 - When everyone else passes, the last player to play **leads** anything.
 - **Host leads round 1** (seat 0). Later rounds, last round’s 1st place leads if they are still living; otherwise the host does.
 - First empty hand is 1st (**President**). Play continues until everyone is placed: VP, Neutral, Vice-Asshole, **Asshole**.
@@ -67,7 +68,7 @@ Finishing in the **same role** consecutive rounds pays bonus gold: streak 1 is b
 
 The Speaker, The Whip, The Veep, The Justice, The General (or whoever occupies an AI seat). They dump low cards, follow cheapest, and save 2s unless they are aggressive or about to go out. Empty lobby seats can be kicked to AI.
 
-Each AI starts with a **personal rank specialty** (Speaker: stronger 2s, Whip: gold on 5s, Veep: Aces always legal, Justice: stronger Kings, General: gold on 3s). After payouts they auto-shop 0–1 item from a 2-offer personal desk with their own gold, and they **use** turn actions (Veto, Filibuster, Tax, Rally, Forge, …) and role cards (Uprising, Just Say No, …). Purchases and uses land in the round log so you can see them.
+Each AI starts with a **personal rank specialty** (Speaker: stronger 2s, Whip: gold on 5s, Veep: Aces always legal, Justice: stronger Kings, General: gold on 3s). They **use** turn actions (Veto, Filibuster, Tax, Rally, Forge, …) and role cards (Uprising, Just Say No, …). **AIs only buy upgrades during the shop round**, after the desk opens, spending their own gold on 0–1 item from a 2-offer personal desk. They do not shop before the desk is open and they do not buy mid-round. Purchases and uses land in the round log so you can see them.
 
 ## Personal rank effects
 
@@ -77,7 +78,9 @@ Shop **rank binds** (or an AI specialty) attach an effect to one rank for **one 
 - `power` — +1 follow power when that seat plays the rank (your 5s can equal a 6; theirs do not)
 - `always_legal` — that rank is always a legal follow of the matching count for that seat (Ace Privilege can follow a bomb)
 
-When a card’s **effective follow value is higher than its printed rank**, the face keeps the **printed rank in red/black** and adds the true value **in blue** (`5 → 6`, with a blue badge). Unbuffed cards are unchanged. This fires for seat-scoped `power` binds (Strong Fives: 5 + blue 6; Ace Authority: A + blue 2; Kingmaker: K + blue A; Heavier Bombs: 2 + blue 2+), **Incumbent** / **Rally** promotions (3 + blue 4), and **Forge Bomb** (printed origin + blue 2). `gold_play` and `always_legal` do not recolor — they are not a higher value.
+When a card’s **effective follow value is higher than its printed rank**, the face keeps the **printed rank in red/black** and adds the true value **in blue** (`5 → 6`, with a blue badge). Unbuffed cards are unchanged. **That blue number is the trick rank** if the card is played — other seats must follow the effective value, not the printed face. This fires for seat-scoped `power` binds (Strong Fives: 5 + blue 6; Ace Authority: A + blue 2; Kingmaker: K + blue A; Heavier Bombs: 2 + blue 2+), **Incumbent** / **Rally** promotions (3 + blue 4), and **Forge Bomb** (printed origin + blue 2). `gold_play` and `always_legal` do not recolor — they are not a higher value. Playing a `gold_play` rank pops a **gold coin** (`$+1`) over the trick.
+
+A large hand **reflows** (tighter overlap, then a second row, then scale) so cards stay on-screen on phone and desktop.
 
 ## Run it
 

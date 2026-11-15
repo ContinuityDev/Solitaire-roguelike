@@ -30,7 +30,13 @@ func _init() -> void:
 	_check(RankSystem.president_power(3) < RankSystem.president_power(4), "3 lower than 4")
 	_check(RankSystem.president_power(1) > RankSystem.president_power(13), "Ace higher than King")
 	_check(RankSystem.president_power(2) > RankSystem.president_power(1), "2 bomb beats Ace")
-	_check(Deck.build_standard().size() == 52, "standard deck is 52")
+	_check(Deck.build_standard().size() == 54, "standard deck is 54 (52 + 2 jokers)")
+	var n_jokers: int = 0
+	for dc in Deck.build_standard():
+		if RankSystem.is_joker((dc as CardData).rank):
+			n_jokers += 1
+	_check(n_jokers == 2, "deck has two jokers")
+	_check(RankSystem.is_joker(0) and RankSystem.short_label(0) == "Jk", "joker label is Jk")
 
 	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 	rng.seed = 12345
@@ -39,7 +45,7 @@ func _init() -> void:
 	var total: int = 0
 	for s in range(6):
 		total += game.hand_of(s).size()
-	_check(total + game.kitty.size() == 52, "deal conserves 52 cards (hands %d kitty %d)" % [total, game.kitty.size()])
+	_check(total + game.kitty.size() == 54, "deal conserves 54 cards (hands %d kitty %d)" % [total, game.kitty.size()])
 	_check(game.hand_of(0).size() >= 8, "each living seat gets a full share")
 
 	game.lead = false
@@ -388,7 +394,68 @@ func _init() -> void:
 	_check(spec_run.buy_upgrade("mod_gold_5", 8), "human can buy a rank bind")
 	_check(spec_run.rank_gold_on_play(0, 5) == 1, "bought Gold Fives binds to seat 0")
 	spec_run.free()
+
+	# Blue value is the trick's true rank: a 5 played as a 6 must be followed as a 6.
+	var gblue: PresidentGame = PresidentGame.new()
+	gblue.living = [0, 1]
+	gblue.hands = {
+		0: [CardData.new(5, 0, true), CardData.new(9, 0, true)],
+		1: [CardData.new(5, 1, true), CardData.new(6, 0, true), CardData.new(7, 0, true)],
+	}
+	gblue.current_player = 0
+	gblue.lead = true
+	gblue.mods = rmod
+	var pblue: Dictionary = gblue.play(0, {"rank": 5, "count": 1})
+	_check(bool(pblue.get("ok", false)), "buffed 5 can be led")
+	_check(gblue.trick_printed == 5, "table still shows the printed 5")
+	_check(gblue.trick_power == 6 and gblue.trick_rank == 6, "trick follow rank becomes 6")
+	_check(gblue.trick_follow_label() == "6", "follow label is a 6")
+	_check(not gblue.is_legal_combo({"rank": 5, "count": 1}, 1), "unbuffed 5 cannot follow a blue 6")
+	_check(not gblue.rank_is_legal(1, 5), "human/AI rank_is_legal rejects a printed 5")
+	_check(gblue.is_legal_combo({"rank": 6, "count": 1}, 1), "a 6 can follow a blue 6")
+	gblue.current_player = 1
+	var ai_blue: Dictionary = PresidentAI.choose(gblue, 1, 1)
+	_check(not bool(ai_blue.get("pass", false)), "AI can follow a blue 6")
+	_check(int(ai_blue.get("combo", {}).get("rank", 0)) != 5, "AI does not follow a blue 6 with a printed 5")
+	_check(gblue.is_legal_combo(ai_blue["combo"], 1), "AI follow of a blue trick is legal")
 	rmod.free()
+
+	# Joker: always legal, dumps the rest of the hand, that seat is out, round ends.
+	var gj: PresidentGame = PresidentGame.new()
+	gj.living = [0, 1, 2]
+	gj.hands = {
+		0: [CardData.new(RankSystem.JOKER, 0, true), CardData.new(4, 0, true)],
+		1: [CardData.new(7, 0, true), CardData.new(8, 0, true)],
+		2: [CardData.new(3, 0, true)],
+	}
+	gj.current_player = 0
+	gj.lead = true
+	_check(gj.is_legal_combo({"rank": RankSystem.JOKER, "count": 1}, 0), "a single joker is always legal")
+	var pj: Dictionary = gj.play(0, {"rank": RankSystem.JOKER, "count": 1})
+	_check(bool(pj.get("joker", false)) and bool(pj.get("ok", false)), "joker play is flagged")
+	_check(gj.round_over, "joker ends the round")
+	_check(gj.finished.size() == 3 and int(gj.finished[0]) == 0, "joker player finishes first")
+	_check(int(gj.finished[1]) == 2, "fewest remaining cards place next")
+	_check(gj.hand_of(0).is_empty(), "joker dumps the rest of that hand")
+	gj.lead = false
+	gj.round_over = false
+	gj.finished.clear()
+	gj.hands[1] = [CardData.new(RankSystem.JOKER, 1, true)]
+	gj.trick_rank = 10
+	gj.trick_count = 2
+	gj.trick_power = 10
+	gj.current_player = 1
+	_check(gj.is_legal_combo({"rank": RankSystem.JOKER, "count": 1}, 1), "joker can follow any trick")
+	var pj2: Dictionary = gj.play(1, {"rank": RankSystem.JOKER, "count": 1})
+	_check(bool(pj2.get("joker", false)) and gj.round_over, "follow-joker still ends the round")
+
+	var phone_h: Dictionary = HandLayout.plan(13, 360.0, Vector2(70, 98))
+	_check(bool(phone_h["fits"]), "13 cards stay on a phone-width row")
+	var desk_h: Dictionary = HandLayout.plan(18, 1200.0, Vector2(70, 98))
+	_check(bool(desk_h["fits"]), "18 cards stay on a desktop row")
+	var tight_h: Dictionary = HandLayout.plan(24, 320.0, Vector2(70, 98))
+	_check(bool(tight_h["fits"]), "24 cards wrap/scale instead of going off-screen")
+	_check(int(tight_h["rows"]) >= 2, "a packed phone hand wraps to a second row")
 
 	# Odds helper: remaining cards + AI influence, not isolated deck math.
 	var og: PresidentGame = PresidentGame.new()
@@ -429,7 +496,13 @@ func _init() -> void:
 	_check(ai_run.gold_of(1) > 0, "AI President earned gold")
 	ai_run.seat_gold[1] = 40
 	ai_run.last_finish = [1, 2, 3, 4, 5, 0]
-	var shop_logs: Array = ai_run.ai_shop_all()
+	var gold_pre: int = ai_run.gold_of(1)
+	var pre_shop: Array = ai_run.ai_shop_all()
+	_check(pre_shop.is_empty(), "AI does not shop before the desk opens")
+	_check(ai_run.gold_of(1) == gold_pre, "AI gold is untouched before the shop")
+	_check(not ai_run.buy_upgrade_for(1, "packed", 12), "AI cannot buy mid-round")
+	_check(ai_run.gold_of(1) == gold_pre, "blocked AI buy does not spend gold")
+	var shop_logs: Array = ai_run.open_shop_phase()
 	_check(shop_logs.size() >= 1, "at least one AI bought from the desk (%d logs)" % shop_logs.size())
 	var bought: bool = false
 	for s in range(1, 6):
@@ -511,8 +584,12 @@ func _init() -> void:
 	hot_run.seat_gold[2] = 40
 	hot_run.last_finish = [0, 1, 2, 3]
 	var before_h: int = hot_run.gold_of(1)
+	var before_ai: int = hot_run.gold_of(2)
 	hot_run.ai_shop_all()
 	_check(hot_run.gold_of(1) == before_h, "AI shop does not spend a human seat's gold")
+	_check(hot_run.gold_of(2) == before_ai, "AI does not spend gold before the shop opens")
+	hot_run.open_shop_phase()
+	_check(hot_run.gold_of(1) == before_h, "shop phase still does not spend a human seat")
 	hot_run.hp[0] = 0
 	hot_run.hp[1] = 0
 	hot_run._check_end()
