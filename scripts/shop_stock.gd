@@ -10,7 +10,8 @@ const REROLL_STEP: int = 2
 const AI_SLOTS: int = 2
 
 static func catalog_size() -> int:
-	return UpgradeDB.UPGRADES.size() + ActionDB.ACTIONS.size() + EnhancementDB.ENHANCEMENTS.size() + RankModDB.MODS.size() + RankEffectDB.EFFECTS.size()
+	return UpgradeDB.UPGRADES.size() + ActionDB.ACTIONS.size() + EnhancementDB.ENHANCEMENTS.size() \
+		+ RankModDB.MODS.size() + RankEffectDB.EFFECTS.size() + ComboBuffDB.COMBOS.size()
 
 static func reroll_cost_at(rerolls_done: int) -> int:
 	return REROLL_BASE + REROLL_STEP * rerolls_done
@@ -30,6 +31,8 @@ static func full_catalog() -> Array:
 		out.append(tagged(m, "upgrade"))
 	for fx in RankEffectDB.EFFECTS:
 		out.append(tagged(fx, "rank_fx"))
+	for cb in ComboBuffDB.COMBOS:
+		out.append(tagged(cb, "combo"))
 	for a in ActionDB.ACTIONS:
 		out.append(tagged(a, "action"))
 	for e in EnhancementDB.ENHANCEMENTS:
@@ -43,6 +46,8 @@ static func max_owned(item: Dictionary) -> int:
 	var id: String = str(item.get("id", ""))
 	if RankEffectDB.is_rank_fx(id):
 		return int(item.get("max", 5))
+	if ComboBuffDB.is_combo(id):
+		return int(item.get("max", 3))
 	if RankModDB.is_mod(id):
 		return 1
 	if kind == "action" or kind == "enhancement":
@@ -77,7 +82,7 @@ static func available(run: RunManager, seat: int = 0) -> Array:
 
 static func _weight(item: Dictionary) -> int:
 	var kind: String = str(item.get("kind", ""))
-	if kind == "rank_fx":
+	if kind == "rank_fx" or kind == "combo":
 		return 4
 	if kind == "enhancement":
 		return 2
@@ -104,7 +109,7 @@ static func draw_offers(rng: RandomNumberGenerator, run: RunManager, count: int 
 	var pool: Array = available(run, seat)
 	var out: Array = []
 	var used: Dictionary = {}
-	for kind in ["upgrade", "rank_fx", "action", "enhancement"]:
+	for kind in ["upgrade", "rank_fx", "combo", "action", "enhancement"]:
 		if out.size() >= count:
 			break
 		var bag: Array = []

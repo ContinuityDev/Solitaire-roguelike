@@ -7,6 +7,7 @@ signal bought_upgrade(item: Dictionary)
 signal bought_action(item: Dictionary)
 signal bought_enhancement(item: Dictionary)
 signal bought_rank_fx(item: Dictionary)
+signal bought_combo(item: Dictionary)
 signal reroll_pressed
 signal closed
 
@@ -109,6 +110,8 @@ func _kind_label(kind: String, currency: String) -> String:
 			return "UPGRADE" if currency != "chips" else "ECONOMY ◈"
 		"rank_fx":
 			return "RANK FX ◈"
+		"combo":
+			return "COMBO" if currency != "chips" else "COMBO ◈"
 		"action":
 			return "ACTION"
 		_:
@@ -131,6 +134,8 @@ func _make_row(item: Dictionary, btn_w: float) -> PanelContainer:
 	if RankEffectDB.is_rank_fx(id):
 		kind = "rank_fx"
 		currency = "chips"
+	if ComboBuffDB.is_combo(id):
+		kind = "combo"
 	var owned_n: int = int(_owned.get(id, 0))
 	if id.begins_with("favorite_"):
 		owned_n = int(_owned.get("favorite", 0))
@@ -138,7 +143,9 @@ func _make_row(item: Dictionary, btn_w: float) -> PanelContainer:
 	var wrap: PanelContainer = PanelContainer.new()
 	var psb: StyleBoxFlat = StyleBoxFlat.new()
 	psb.bg_color = Color(0.12, 0.16, 0.26) if can else Color(0.09, 0.10, 0.14)
-	if currency == "chips":
+	if kind == "combo":
+		psb.border_color = Color(0.95, 0.55, 0.85, 0.9) if can else Color(0.35, 0.36, 0.42, 0.6)
+	elif currency == "chips":
 		psb.border_color = Color(0.45, 0.85, 0.95, 0.9) if can else Color(0.35, 0.36, 0.42, 0.6)
 	else:
 		psb.border_color = Color(0.85, 0.70, 0.28, 0.85) if can else Color(0.35, 0.36, 0.42, 0.6)
@@ -164,7 +171,11 @@ func _make_row(item: Dictionary, btn_w: float) -> PanelContainer:
 	kind_l.add_theme_color_override("font_color", Color(0.55, 0.88, 0.95) if currency == "chips" else Color(0.92, 0.78, 0.35))
 	col.add_child(kind_l)
 	var name_l: Label = Label.new()
-	var owned_bit: String = "  ·  Lv%d" % owned_n if owned_n > 0 and kind == "rank_fx" else ("  ·  owned ×%d" % owned_n if owned_n > 0 else "")
+	var owned_bit: String = ""
+	if owned_n > 0 and (kind == "rank_fx" or kind == "combo"):
+		owned_bit = "  ·  Lv%d" % owned_n
+	elif owned_n > 0:
+		owned_bit = "  ·  owned ×%d" % owned_n
 	name_l.text = "%s%s" % [str(item.get("name", "?")), owned_bit]
 	name_l.add_theme_font_size_override("font_size", 15)
 	name_l.add_theme_color_override("font_color", Color(0.96, 0.93, 0.82) if can else Color(0.55, 0.55, 0.58))
@@ -186,6 +197,8 @@ func _make_row(item: Dictionary, btn_w: float) -> PanelContainer:
 		match str(captured.get("kind", "upgrade")):
 			"rank_fx":
 				bought_rank_fx.emit(captured)
+			"combo":
+				bought_combo.emit(captured)
 			"action":
 				bought_action.emit(captured)
 			"enhancement":

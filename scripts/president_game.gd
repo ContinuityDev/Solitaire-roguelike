@@ -193,55 +193,54 @@ func play(seat: int, combo: Dictionary) -> Dictionary:
 	var count: int = int(combo["count"])
 	if count_of_rank(seat, rank) < count:
 		return {"ok": false, "reason": "not in hand"}
+	# Snapshot base + power before taking cards (inflation / binds need the face in-hand).
+	var base_rank: int = base_of_rank(seat, rank)
+	var base_power: int = 0 if RankSystem.is_joker(rank) else play_power(seat, rank)
+	var was_lead: bool = lead
 	_take_cards(seat, rank, count)
+	var emptied: bool = hand_of(seat).is_empty()
+	var power_mult: int = 1
+	if mods != null and not RankSystem.is_joker(rank):
+		power_mult = maxi(1, mods.combo_power_mult(seat, base_rank, count, was_lead, emptied))
 	exec_order = false
 	must_pass_seat = -1
-	trick_printed = rank
 	trick_player = seat
-	lead = false
 	passes = 0
 	if RankSystem.is_joker(rank):
-		trick_count = 1
-		trick_power = 99
-		trick_rank = RankSystem.JOKER
-		var jlabel: String = "JOKER — round over"
+		# Joker clears the current pile and returns the lead to this seat.
+		# It does NOT dump the hand or end the round.
+		lead = true
+		trick_rank = 0
+		trick_printed = 0
+		trick_power = 0
+		trick_count = 0
+		var jlabel: String = "JOKER — pile cleared"
 		last_play_label[seat] = jlabel
-		history.append({"seat": seat, "rank": rank, "count": 1, "joker": true})
-		var rest: Array = hand_of(seat).duplicate()
-		for c in rest:
-			kitty.append(c)
-		hands[seat].clear()
-		if not finished.has(seat):
+		history.append({"seat": seat, "rank": rank, "count": 1, "joker": true, "clear": true})
+		if emptied and not finished.has(seat):
 			finished.append(seat)
-		_resolve_joker_round()
-		return {"ok": true, "label": jlabel, "finished": true, "joker": true}
+			last_play_label[seat] = "OUT %d%s" % [finished.size(), _ord(finished.size())]
+			_check_round_over()
+			if not round_over:
+				_next_player()
+		else:
+			current_player = seat
+		return {"ok": true, "label": jlabel, "finished": emptied, "joker": true, "clear": true, "base_rank": base_rank, "count": count, "lead": was_lead}
+	lead = false
+	trick_printed = rank
 	trick_count = count
-	trick_power = play_power(seat, rank)
+	trick_power = base_power * power_mult
 	trick_rank = RankSystem.rank_from_power(trick_power)
 	var label: String = "%dx %s" % [count, RankSystem.short_label_for_power(trick_power)]
+	if power_mult > 1:
+		label = "%s ×%d" % [label, power_mult]
 	last_play_label[seat] = label
-	history.append({"seat": seat, "rank": rank, "count": count, "power": trick_power})
-	if hand_of(seat).is_empty() and not finished.has(seat):
+	history.append({"seat": seat, "rank": rank, "count": count, "power": trick_power, "mult": power_mult, "base_rank": base_rank})
+	if emptied and not finished.has(seat):
 		finished.append(seat)
 		last_play_label[seat] = "OUT %d%s" % [finished.size(), _ord(finished.size())]
 	_advance_after_play()
-	return {"ok": true, "label": label, "finished": finished.has(seat)}
-
-func _resolve_joker_round() -> void:
-	var rest: Array = []
-	for s in living:
-		if not finished.has(int(s)):
-			rest.append(int(s))
-	rest.sort_custom(func(a: int, b: int) -> bool:
-		var na: int = hand_of(a).size()
-		var nb: int = hand_of(b).size()
-		if na == nb:
-			return a < b
-		return na < nb
-	)
-	for s2 in rest:
-		finished.append(int(s2))
-	round_over = true
+	return {"ok": true, "label": label, "finished": finished.has(seat), "base_rank": base_rank, "mult": power_mult, "count": count, "lead": was_lead}
 
 func pass_turn(seat: int) -> Dictionary:
 	if round_over or seat != current_player:

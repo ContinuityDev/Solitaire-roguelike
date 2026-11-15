@@ -420,7 +420,7 @@ func _init() -> void:
 	_check(gblue.is_legal_combo(ai_blue["combo"], 1), "AI follow of a blue trick is legal")
 	rmod.free()
 
-	# Joker: always legal, dumps the rest of the hand, that seat is out, round ends.
+	# Joker: always legal; clears the pile and returns the lead — does NOT end the round.
 	var gj: PresidentGame = PresidentGame.new()
 	gj.living = [0, 1, 2]
 	gj.hands = {
@@ -429,25 +429,37 @@ func _init() -> void:
 		2: [CardData.new(3, 0, true)],
 	}
 	gj.current_player = 0
-	gj.lead = true
+	gj.lead = false
+	gj.trick_rank = 10
+	gj.trick_count = 1
+	gj.trick_power = 10
+	gj.trick_printed = 10
 	_check(gj.is_legal_combo({"rank": RankSystem.JOKER, "count": 1}, 0), "a single joker is always legal")
 	var pj: Dictionary = gj.play(0, {"rank": RankSystem.JOKER, "count": 1})
 	_check(bool(pj.get("joker", false)) and bool(pj.get("ok", false)), "joker play is flagged")
-	_check(gj.round_over, "joker ends the round")
-	_check(gj.finished.size() == 3 and int(gj.finished[0]) == 0, "joker player finishes first")
-	_check(int(gj.finished[1]) == 2, "fewest remaining cards place next")
-	_check(gj.hand_of(0).is_empty(), "joker dumps the rest of that hand")
+	_check(bool(pj.get("clear", false)), "joker clears the pile")
+	_check(not gj.round_over, "joker does not end the round")
+	_check(gj.finished.is_empty(), "joker does not finish the seat when cards remain")
+	_check(gj.hand_of(0).size() == 1, "joker only removes itself; rest of hand stays")
+	_check(gj.lead and gj.trick_count == 0 and gj.trick_power == 0, "pile cleared; seat has the lead")
+	_check(gj.current_player == 0, "joker player keeps the lead")
+	# Follow-joker as last card: seat finishes, but round continues if others remain.
 	gj.lead = false
 	gj.round_over = false
 	gj.finished.clear()
 	gj.hands[1] = [CardData.new(RankSystem.JOKER, 1, true)]
+	gj.hands[0] = [CardData.new(4, 0, true)]
+	gj.hands[2] = [CardData.new(3, 0, true)]
 	gj.trick_rank = 10
 	gj.trick_count = 2
 	gj.trick_power = 10
 	gj.current_player = 1
 	_check(gj.is_legal_combo({"rank": RankSystem.JOKER, "count": 1}, 1), "joker can follow any trick")
 	var pj2: Dictionary = gj.play(1, {"rank": RankSystem.JOKER, "count": 1})
-	_check(bool(pj2.get("joker", false)) and gj.round_over, "follow-joker still ends the round")
+	_check(bool(pj2.get("joker", false)) and bool(pj2.get("finished", false)), "last-card joker finishes that seat")
+	_check(not gj.round_over, "follow-joker does not end the round while others remain")
+	_check(gj.finished.size() == 1 and int(gj.finished[0]) == 1, "only the joker seat finished")
+	_check(gj.lead and gj.trick_count == 0, "follow-joker still clears the pile")
 
 	var phone_h: Dictionary = HandLayout.plan(13, 360.0, Vector2(70, 98))
 	_check(bool(phone_h["fits"]), "13 cards stay on a phone-width row")
@@ -882,6 +894,70 @@ func _init() -> void:
 	_check(g_base.base_of_rank(0, c_base.rank) == 5, "game resolves base_of_rank through inflation")
 	_check(g_base.play_power(0, c_base.rank) >= RankSystem.president_power(c_base.rank) + chip_run.rank_power_bonus(0, 5), "play power uses base-rank bonus")
 
+	# Combo buffs: conditions (rank / count / lead / last) + effects (mult / gold / chips / retrigger)
+	_check(ComboBuffDB.matches({"rank": 4, "count": 4}, 4, 4, false, false), "quad-4 condition matches four 4s")
+	_check(not ComboBuffDB.matches({"rank": 4, "count": 4}, 4, 3, false, false), "quad-4 does not match trips")
+	_check(not ComboBuffDB.matches({"rank": 4, "count": 4}, 5, 4, false, false), "quad-4 does not match four 5s")
+	_check(ComboBuffDB.matches({"rank": -1, "count": 2}, 9, 2, false, false), "any-pair matches a pair of 9s")
+	_check(ComboBuffDB.matches({"rank": -1, "count": 0, "last_card": true}, 7, 1, false, true), "last-card condition")
+	_check(not ComboBuffDB.matches({"rank": -1, "count": 0, "last_card": true}, 7, 1, false, false), "last-card requires emptying")
+	_check(ComboBuffDB.matches({"rank": 1, "count": 0, "lead": true}, 1, 2, true, false), "lead Ace condition")
+	_check(not ComboBuffDB.matches({"rank": 1, "count": 0, "lead": true}, 1, 2, false, false), "lead Ace requires lead")
+
+	var combo_run: RunManager = RunManager.new()
+	combo_run.start_new_run()
+	combo_run.gold = 100
+	combo_run.chips = 20
+	_check(combo_run.buy_upgrade("combo_quad_4", 14), "can buy Quad Fours")
+	_check(combo_run.combo_power_mult(0, 4, 4) == 4, "Quad Fours ×4 on four 4s")
+	_check(combo_run.combo_power_mult(0, 4, 3) == 1, "Quad Fours idle on trips of 4")
+	_check(combo_run.combo_power_mult(0, 5, 4) == 1, "Quad Fours idle on four 5s")
+	_check(combo_run.buy_upgrade("combo_quad_4", 14), "can level Quad Fours")
+	_check(combo_run.combo_power_mult(0, 4, 4) == 5, "leveled Quad Fours is ×5")
+	_check(combo_run.buy_upgrade("combo_quad_any", 16), "can buy Quad Force")
+	_check(combo_run.combo_power_mult(0, 4, 4) == 10, "Quad Fours × Quad Force stacks (5×2)")
+
+	var g_quad: PresidentGame = PresidentGame.new()
+	g_quad.living = [0, 1]
+	g_quad.hands = {
+		0: [CardData.new(4, 0, true), CardData.new(4, 1, true), CardData.new(4, 2, true), CardData.new(4, 3, true)],
+		1: [CardData.new(8, 0, true)],
+	}
+	g_quad.mods = combo_run
+	g_quad.current_player = 0
+	g_quad.lead = true
+	var pq: Dictionary = g_quad.play(0, {"rank": 4, "count": 4})
+	_check(bool(pq.get("ok", false)) and int(pq.get("mult", 1)) == 10, "play applies combo power mult")
+	_check(g_quad.trick_power == RankSystem.president_power(4) * 10, "trick power is base × mult")
+
+	combo_run.gold = 0
+	combo_run.chips = 0
+	combo_run.owned_upgrades.append("combo_pair_5_gold")
+	combo_run.owned_upgrades.append("combo_retrigger_5")
+	combo_run.bind_or_level_rank_effect(0, 5, "gold")
+	combo_run.bind_or_level_rank_effect(0, 5, "gold")
+	# Pair of 5s: rank gold fires twice (base + 1 retrigger) = 4, plus pair gold +3.
+	var pair_res: Dictionary = combo_run.trigger_rank_play(0, 5, [], 2, false, false)
+	_check(int(pair_res.get("retriggers", 0)) == 1, "Five Echo retriggers once on 5s")
+	_check(int(pair_res.get("gold", 0)) == 2 * 2 + 3, "retrigger doubles rank gold; pair mint pays")
+	_check(combo_run.gold == 7, "combo gold credited to seat")
+
+	combo_run.chips = 0
+	combo_run.owned_upgrades.append("combo_trips_3_chip")
+	var trip_res: Dictionary = combo_run.trigger_rank_play(0, 3, [], 3, false, false)
+	_check(int(trip_res.get("chips", 0)) == 2, "Triple Chips pays on three 3s")
+	var miss_res: Dictionary = combo_run.trigger_rank_play(0, 3, [], 2, false, false)
+	_check(int(miss_res.get("chips", 0)) == 0, "Triple Chips idle on a pair of 3s")
+
+	combo_run.gold = 0
+	combo_run.owned_upgrades.append("combo_last_card_gold")
+	var exit_res: Dictionary = combo_run.trigger_rank_play(0, 9, [], 1, false, true)
+	_check(int(exit_res.get("gold", 0)) == 5, "Exit Bonus pays on emptying hand")
+	_check(combo_run.combo_short(0).contains("4"), "combo short badge lists owned combos")
+	_check(not ComboBuffDB.get_by_id("combo_quad_4").is_empty(), "ComboBuffDB lookup works")
+	_check(UpgradeDB.get_by_id("combo_retrigger_pair").get("effect", "") == "retrigger", "UpgradeDB resolves combo ids")
+
+	combo_run.free()
 	chip_run.free()
 	econ.free()
 	scale_run.free()

@@ -184,6 +184,7 @@ func _build_ui() -> void:
 	_shop.bought_action.connect(_on_buy_action)
 	_shop.bought_enhancement.connect(_on_buy_enhancement)
 	_shop.bought_rank_fx.connect(_on_buy_rank_fx)
+	_shop.bought_combo.connect(_on_buy_combo)
 	_shop.reroll_pressed.connect(_on_shop_reroll)
 	_shop.closed.connect(_on_shop_closed)
 	var resh: CenterContainer = CenterContainer.new()
@@ -689,7 +690,9 @@ func _ai_act() -> void:
 	var combo: Dictionary = choice["combo"]
 	var play_rank: int = int(combo.get("rank", 0))
 	var play_base: int = game.base_of_rank(seat, play_rank)
-	var origins: Array = _seat_origins(seat, int(combo.get("count", 1)))
+	var play_count: int = int(combo.get("count", 1))
+	var was_lead: bool = game.lead
+	var origins: Array = _seat_origins(seat, play_count)
 	var r: Dictionary = game.play(seat, combo)
 	if not bool(r.get("ok", false)):
 		game.pass_turn(seat)
@@ -699,7 +702,7 @@ func _ai_act() -> void:
 		_lan_push()
 		_continue_turns()
 		return
-	_fire_rank_play(seat, play_base)
+	_fire_rank_play(seat, play_base, play_count, was_lead, bool(r.get("finished", false)))
 	_message("%s plays %s." % [run.name_of(seat), str(r.get("label", ""))])
 	await _fly_from(origins, combo, seat)
 	_refresh()
@@ -717,6 +720,7 @@ func _on_play() -> void:
 	var rank: int = (_selected[0] as CardData).rank
 	var base_rank: int = (_selected[0] as CardData).base_rank if (_selected[0] as CardData).base_rank > 0 else rank
 	var combo: Dictionary = {"rank": rank, "count": _selected.size()}
+	var was_lead: bool = game.lead
 	if not game.is_legal_combo(combo, _view_seat):
 		_message("Need %d of that rank to follow." % game.trick_count if not game.lead else "Illegal combo.")
 		return
@@ -732,7 +736,7 @@ func _on_play() -> void:
 		_message("Illegal play (%s)." % str(r.get("reason", "")))
 		return
 	_selected.clear()
-	_fire_rank_play(_view_seat, base_rank)
+	_fire_rank_play(_view_seat, base_rank, int(combo["count"]), was_lead, bool(r.get("finished", false)))
 	_message("%s plays %s." % [run.name_of(_view_seat), str(r.get("label", ""))])
 	_busy = true
 	await _fly_from(origins, combo, _view_seat)
@@ -884,17 +888,19 @@ func _pop_pass(seat: int) -> void:
 			chip.queue_free()
 	)
 
-func _fire_rank_play(seat: int, base_rank: int) -> void:
-	if base_rank <= 0:
+func _fire_rank_play(seat: int, base_rank: int, count: int = 1, is_lead: bool = false, last_card: bool = false) -> void:
+	if base_rank < 0:
 		return
 	var hand: Array = game.hand_of(seat)
-	var res: Dictionary = run.trigger_rank_play(seat, base_rank, hand)
+	var res: Dictionary = run.trigger_rank_play(seat, base_rank, hand, count, is_lead, last_card)
 	if int(res.get("gold", 0)) > 0:
 		_pop_gold(seat, int(res["gold"]))
 	if int(res.get("chips", 0)) > 0:
 		_pop_chips(seat, int(res["chips"]))
 	if int(res.get("damage", 0)) > 0:
 		_pop_damage(int(res.get("target", -1)), int(res["damage"]))
+	if int(res.get("retriggers", 0)) > 0:
+		_message("%s retrigger ×%d." % [run.name_of(seat), int(res["retriggers"]) + 1])
 
 func _pop_chips(seat: int, n: int) -> void:
 	var chip: Label = Label.new()
@@ -1076,6 +1082,18 @@ func _on_buy_rank_fx(item: Dictionary) -> void:
 		_lan_push()
 	else:
 		_message("Not enough Survivor Chips.")
+
+func _on_buy_combo(item: Dictionary) -> void:
+	if not _is_authority():
+		_net.send_intent({"kind": "shop_buy", "buy": "combo", "id": str(item["id"])})
+		return
+	if run.buy_upgrade(str(item["id"]), int(item["price"])):
+		run.take_shop_offer(str(item["id"]))
+		_message("Combo: %s." % str(item["name"]))
+		_reopen_shop()
+		_lan_push()
+	else:
+		_message("Not enough %s." % ("chips" if UpgradeDB.currency_of(item) == "chips" else "gold"))
 
 func _on_buy_action(item: Dictionary) -> void:
 	if not _is_authority():
@@ -1766,11 +1784,12 @@ func _host_remote_play(seat: int, rank: int, count: int) -> void:
 	if not game.is_legal_combo(combo, seat):
 		return
 	var play_base: int = game.base_of_rank(seat, rank)
+	var was_lead: bool = game.lead
 	var origins: Array = _seat_origins(seat, count)
 	var r: Dictionary = game.play(seat, combo)
 	if not bool(r.get("ok", false)):
 		return
-	_fire_rank_play(seat, play_base)
+	_fire_rank_play(seat, play_base, count, was_lead, bool(r.get("finished", false)))
 	_message("%s plays %s." % [run.name_of(seat), str(r.get("label", ""))])
 	_lan_wait.clear()
 	_busy = true
@@ -1805,7 +1824,7 @@ func _host_shop_buy(seat: int, buy: String, id: String) -> void:
 	item = run.priced_copy_of(seat, item)
 	var ok: bool = false
 	match buy:
-		"upgrade", "rank_fx":
+		"upgrade", "rank_fx", "combo":
 			ok = run.buy_upgrade(id, int(item.get("price", 0)))
 		"action":
 			ok = run.buy_action(id, int(item.get("price", 0)))

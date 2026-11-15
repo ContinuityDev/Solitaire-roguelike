@@ -59,6 +59,9 @@ static func get_by_id(id: String) -> Dictionary:
 	var fx: Dictionary = RankEffectDB.get_by_id(id)
 	if not fx.is_empty():
 		return fx
+	var combo: Dictionary = ComboBuffDB.get_by_id(id)
+	if not combo.is_empty():
+		return combo
 	return {}
 
 static func currency_of(item: Dictionary) -> String:

@@ -21,7 +21,7 @@ There is **no win screen**. The run continues until every human hits 0 HP. Dead 
 - **54-card deck** (52 + **2 jokers**), six seats. Rank order: **3 lowest … King, Ace, then 2s (bombs)**, then uncapped **super ranks** (16, 17, …) once inflation / Incumbent climb past bombs.
 - Each round applies **rank inflation** (`bonus = (r−1) + ⌊(r−1)² / 8⌋` where `r` is the round). Faces show compact labels at huge values (`1.2K`, `3.4M`, scientific past trillions).
 - Play **N of a kind** (single, pair, trips, four). Follow with the same count, equal or **higher effective rank**. A blue value is the trick’s true rank: if someone plays a 5 that reads as a blue 6, the trick is a 6 — a printed 5 cannot follow. Pass if you cannot or will not.
-- **Joker (instant round-ender):** a single joker is always legal on your turn (lead or follow, any count). Playing it dumps the rest of that seat’s hand to the kitty, that seat **finishes immediately** (President if they are first out), and the round is over. Remaining seats are ranked by **fewest cards left** (seat index breaks ties). Jokers have a purple **Jk / JOKER** face (red or black star).
+- **Joker (pile clear):** a single joker is always legal on your turn (lead or follow, any count). Playing it **clears the current pile** and returns the **lead** to that seat — it does **not** dump the rest of the hand or end the round. If the joker was your last card, you still finish as usual. Jokers have a purple **Jk / JOKER** face (red or black star).
 - When everyone else passes, the last player to play **leads** anything.
 - **Host leads round 1** (seat 0). Later rounds, last round’s 1st place leads if they are still living; otherwise the host does.
 - First empty hand is 1st (**President**). Play continues until everyone is placed: VP, Neutral, Vice-Asshole, **Asshole**.
@@ -53,6 +53,9 @@ Everyone starts at **50 HP**. You do **not** die after round 1. **Every seat ear
 
 ### Rank customizations
 Chip offers bind an effect to a **deal-face** (3…K, A, 2). Inflation / Incumbent change the printed number, but the customization still fires. Effects (level by rebuying): **gold**, **chips**, **power**, **damage** (weakest AI), **heal**, **always legal**, **buff hand** (promote lowest). Teal ribbon on the card shows the active effects.
+
+### Combo buffs
+Desk **COMBO** offers (gold or ◈) attach a **condition** (rank, play shape single/pair/trips/quad, lead, emptying hand) to an **effect** (multiply follow power, gold, chips, or **retrigger** rank buffs). Examples: **Quad Fours** (four 4s → follow power ×4), **Five Echo** (playing 5s retriggers their rank buffs), **Paired Mint** (pair of 5s → gold), **Exit Bonus** (emptying your hand → gold). Rebuy to level; matching mults stack by multiplying. HUD bind string and desk rows show owned combos.
 
 | Place | Gold | HP |
 |---|---|---|

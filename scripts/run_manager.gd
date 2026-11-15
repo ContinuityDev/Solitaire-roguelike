@@ -493,6 +493,7 @@ func rank_mod_short(seat: int) -> String:
 			RankSystem.short_label(int(d2.get("rank", 0))),
 			RankEffectDB.effect_label(str(d2.get("effect", "")), int(d2.get("level", 1))),
 		])
+	bits.append(combo_short(seat))
 	return "".join(bits)
 
 func bind_rank_mod(seat: int, rank: int, effect: String) -> void:
@@ -611,16 +612,77 @@ func _grant_survivor_chips(gold_earned: Dictionary) -> void:
 					row["chips"] = int(row.get("chips", 0)) + chip_gain
 					break
 
-## Fire rank customizations when a seat plays a combo. `base_rank` is the deal-face.
-## Returns {gold, chips, damage, heal, logs, target}.
-func trigger_rank_play(seat: int, base_rank: int, hand: Array = []) -> Dictionary:
-	var out: Dictionary = {"gold": 0, "chips": 0, "damage": 0, "heal": 0, "logs": [], "target": -1}
-	if base_rank <= 0:
+## Owned combo buffs for a seat (leveled by repurchase). One entry per id.
+func combo_buffs_of(seat: int) -> Array:
+	var out: Array = []
+	var seen: Dictionary = {}
+	for id in upgrades_of(seat):
+		var sid: String = str(id)
+		if not ComboBuffDB.is_combo(sid) or seen.has(sid):
+			continue
+		seen[sid] = true
+		var info: Dictionary = ComboBuffDB.get_by_id(sid)
+		if info.is_empty():
+			continue
+		var d: Dictionary = info.duplicate()
+		d["level"] = count_upgrade_of(seat, sid)
+		out.append(d)
+	return out
+
+## Multiply follow power when combo conditions match (e.g. Quad Fours ×4).
+## Matching mult buffs multiply together; each stack level adds +1 to that buff's amount.
+func combo_power_mult(seat: int, base_rank: int, count: int, is_lead: bool = false, last_card: bool = false) -> int:
+	var mult: int = 1
+	for buff in combo_buffs_of(seat):
+		if str(buff.get("effect", "")) != "mult_power":
+			continue
+		if not ComboBuffDB.matches(buff, base_rank, count, is_lead, last_card):
+			continue
+		var amt: int = int(buff.get("amount", 1))
+		var lvl: int = int(buff.get("level", 1))
+		mult *= maxi(1, amt + (lvl - 1))
+	return maxi(1, mult)
+
+func combo_retrigger_count(seat: int, base_rank: int, count: int, is_lead: bool, last_card: bool) -> int:
+	var n: int = 0
+	for buff in combo_buffs_of(seat):
+		if str(buff.get("effect", "")) != "retrigger":
+			continue
+		if not ComboBuffDB.matches(buff, base_rank, count, is_lead, last_card):
+			continue
+		n += int(buff.get("amount", 1)) * int(buff.get("level", 1))
+	return n
+
+func combo_short(seat: int) -> String:
+	var bits: PackedStringArray = PackedStringArray()
+	for buff in combo_buffs_of(seat):
+		bits.append(" " + ComboBuffDB.short_label(buff, int(buff.get("level", 1))))
+	return "".join(bits)
+
+## Fire rank customizations + combo buffs when a seat plays.
+## `base_rank` is the deal-face. Returns {gold, chips, damage, heal, logs, target, retriggers, mult}.
+func trigger_rank_play(seat: int, base_rank: int, hand: Array = [], count: int = 1, is_lead: bool = false, last_card: bool = false) -> Dictionary:
+	var out: Dictionary = {"gold": 0, "chips": 0, "damage": 0, "heal": 0, "logs": [], "target": -1, "retriggers": 0, "mult": 1}
+	if base_rank < 0:
 		return out
+	var times: int = 1 + combo_retrigger_count(seat, base_rank, count, is_lead, last_card)
+	out["retriggers"] = times - 1
+	for _t in range(times):
+		_apply_rank_bind_pulse(seat, base_rank, hand, out)
+	_apply_combo_payouts(seat, base_rank, count, is_lead, last_card, out)
+	for line in out["logs"]:
+		log_event(str(line))
+	if not (out["logs"] as Array).is_empty():
+		changed.emit()
+	return out
+
+func _apply_rank_bind_pulse(seat: int, base_rank: int, hand: Array, out: Dictionary) -> void:
+	if base_rank <= 0:
+		return
 	var gold_n: int = rank_gold_on_play(seat, base_rank)
 	if gold_n > 0:
 		add_gold(seat, gold_n)
-		out["gold"] = gold_n
+		out["gold"] = int(out["gold"]) + gold_n
 		(out["logs"] as Array).append("%s earns $%d on %s." % [name_of(seat), gold_n, RankSystem.short_label(base_rank)])
 		var echo_n: int = count_upgrade_of(seat, "echo")
 		if echo_n > 0:
@@ -637,11 +699,10 @@ func trigger_rank_play(seat: int, base_rank: int, hand: Array = []) -> Dictionar
 		var target: int = _weakest_living_ai(seat)
 		if target >= 0:
 			hp[target] = maxi(0, int(hp[target]) - dmg)
-			out["damage"] = dmg
+			out["damage"] = int(out["damage"]) + dmg
 			out["target"] = target
 			(out["logs"] as Array).append("%s whips %s for %d HP." % [name_of(seat), name_of(target), dmg])
 			if int(hp[target]) <= 0 and is_ai(target):
-				# Mid-round KO still banks Survivor Chips for living humans.
 				var ko_chips: int = CHIP_PER_KO + count_upgrade_of(seat, "chip_magnet")
 				if is_human(seat) and ko_chips > 0:
 					add_chips(seat, ko_chips)
@@ -651,19 +712,34 @@ func trigger_rank_play(seat: int, base_rank: int, hand: Array = []) -> Dictionar
 	if heal_n > 0 and is_alive(seat):
 		var before: int = int(hp[seat])
 		hp[seat] = mini(int(seat_max_hp[seat]), before + heal_n)
-		out["heal"] = int(hp[seat]) - before
-		if int(out["heal"]) > 0:
-			(out["logs"] as Array).append("%s heals %d HP." % [name_of(seat), int(out["heal"])])
+		var gained: int = int(hp[seat]) - before
+		out["heal"] = int(out["heal"]) + gained
+		if gained > 0:
+			(out["logs"] as Array).append("%s heals %d HP." % [name_of(seat), gained])
 	var buff_n: int = rank_effect_level(seat, base_rank, "buff_hand")
 	if buff_n > 0 and not hand.is_empty():
 		var labs: PackedStringArray = CardForge.promote_lowest(hand, buff_n)
 		if not labs.is_empty():
 			(out["logs"] as Array).append("%s coaches: %s" % [name_of(seat), ", ".join(labs)])
-	for line in out["logs"]:
-		log_event(str(line))
-	if not (out["logs"] as Array).is_empty():
-		changed.emit()
-	return out
+
+func _apply_combo_payouts(seat: int, base_rank: int, count: int, is_lead: bool, last_card: bool, out: Dictionary) -> void:
+	for buff in combo_buffs_of(seat):
+		var eff: String = str(buff.get("effect", ""))
+		if eff != "gold" and eff != "chips":
+			continue
+		if not ComboBuffDB.matches(buff, base_rank, count, is_lead, last_card):
+			continue
+		var amt: int = int(buff.get("amount", 1)) * int(buff.get("level", 1))
+		if amt <= 0:
+			continue
+		if eff == "gold":
+			add_gold(seat, amt)
+			out["gold"] = int(out["gold"]) + amt
+			(out["logs"] as Array).append("%s combo %s: +$%d." % [name_of(seat), str(buff.get("name", "")), amt])
+		else:
+			add_chips(seat, amt)
+			out["chips"] = int(out["chips"]) + amt
+			(out["logs"] as Array).append("%s combo %s: +%d◈." % [name_of(seat), str(buff.get("name", "")), amt])
 
 func _weakest_living_ai(except_seat: int = -1) -> int:
 	var best: int = -1
@@ -773,6 +849,11 @@ func buy_upgrade_for(seat: int, id: String, price: int) -> bool:
 			_refund(seat, price, currency)
 			return false
 		bind_rank_mod(seat, int(mod.get("rank", 0)), str(mod.get("effect", "")))
+		changed.emit()
+		return true
+	if ComboBuffDB.is_combo(id):
+		# Stored as a normal upgrade id; level = count of copies.
+		upgrades_of(seat).append(id)
 		changed.emit()
 		return true
 	if id.begins_with("favorite_"):
@@ -993,8 +1074,9 @@ func ai_shop_all() -> Array:
 		var offers: Array = ShopStock.draw_offers(rng, self, ShopStock.AI_SLOTS, seat)
 		var priced: Array = []
 		for o in offers:
-			# AIs only spend gold — skip chip-priced customizations / economy.
-			if UpgradeDB.currency_of(o) == "chips" or RankEffectDB.is_rank_fx(str(o.get("id", ""))):
+			# AIs only spend gold — skip chip-priced customizations / combos / economy.
+			var oid: String = str(o.get("id", ""))
+			if UpgradeDB.currency_of(o) == "chips" or RankEffectDB.is_rank_fx(oid) or ComboBuffDB.is_combo(oid):
 				continue
 			priced.append(priced_copy_of(seat, o))
 		if priced.is_empty():
