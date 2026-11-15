@@ -1,11 +1,17 @@
 class_name NetSession
 extends Node
 
-## Host-authoritative LAN (ENet). Host is always seat 0. Web builds cannot listen.
+## Host-authoritative table. Web uses WebRTC (join by table code).
+## Desktop uses ENet LAN (join by IP). Host is always seat 0.
 
 const PORT: int = 24567
 const MAX_CLIENTS: int = 5
 const PROTOCOL: int = 1
+const STUN: Dictionary = {
+	"iceServers": [
+		{"urls": ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302"]},
+	],
+}
 
 signal lobby_changed
 signal match_started
@@ -24,10 +30,22 @@ var seat_peer: Dictionary = {} # seat -> peer_id
 var lobby: LobbyConfig = null
 var last_snapshot: Dictionary = {}
 var join_ip: String = "127.0.0.1"
+var join_code: String = ""
 var in_match: bool = false
 
+var _rtc: WebRTCMultiplayerPeer
+var _mqtt: MqttWs
+var _uid: String = ""
+var _next_peer_id: int = 2
+var _use_webrtc: bool = false
+var _pending: Array = [] # signaling msgs before the peer exists
+var _seen_uids: Dictionary = {}
+
 static func lan_supported() -> bool:
-	return not OS.has_feature("web")
+	return true
+
+static func uses_webrtc() -> bool:
+	return OS.has_feature("web")
 
 static func advertised_ips() -> PackedStringArray:
 	var out: PackedStringArray = PackedStringArray()
@@ -59,43 +77,44 @@ func _set_status(t: String) -> void:
 
 func host_listen(cfg: LobbyConfig, player_name: String) -> Error:
 	close()
-	if not lan_supported():
-		_set_status("LAN needs the desktop build (not the web page).")
-		return ERR_UNAVAILABLE
 	lobby = cfg
 	lobby.lan = true
 	local_name = player_name.strip_edges()
 	if local_name == "":
 		local_name = "You"
 	lobby.set_display_name(0, local_name)
+	if uses_webrtc():
+		return _host_webrtc()
+	return _host_enet()
+
+func join(target: String, player_name: String) -> Error:
+	close()
+	local_name = player_name.strip_edges()
+	if local_name == "":
+		local_name = "Guest"
+	if uses_webrtc():
+		return _join_webrtc(target)
+	return _join_enet(target)
+
+func _host_enet() -> Error:
+	_use_webrtc = false
 	var peer: ENetMultiplayerPeer = ENetMultiplayerPeer.new()
 	var err: Error = peer.create_server(PORT, MAX_CLIENTS)
 	if err != OK:
 		_set_status("Could not listen on %d (is another host open?)." % PORT)
 		return err
 	multiplayer.multiplayer_peer = peer
-	active = true
-	is_host = true
-	local_seat = 0
-	peer_seat[1] = 0
-	seat_peer[0] = 1
-	_bind_multiplayer()
+	_mark_host_ready()
 	var ips: PackedStringArray = advertised_ips()
-	_set_status("Listening on UDP %d  ·  %s" % [PORT, ", ".join(ips)])
+	_set_status("LAN UDP %d  ·  %s" % [PORT, ", ".join(ips)])
 	lobby_changed.emit()
 	return OK
 
-func join(ip: String, player_name: String) -> Error:
-	close()
-	if not lan_supported():
-		_set_status("LAN join needs the desktop build.")
-		return ERR_UNAVAILABLE
+func _join_enet(ip: String) -> Error:
+	_use_webrtc = false
 	join_ip = ip.strip_edges()
 	if join_ip == "":
 		join_ip = "127.0.0.1"
-	local_name = player_name.strip_edges()
-	if local_name == "":
-		local_name = "Guest"
 	var peer: ENetMultiplayerPeer = ENetMultiplayerPeer.new()
 	var err: Error = peer.create_client(join_ip, PORT)
 	if err != OK:
@@ -109,18 +128,224 @@ func join(ip: String, player_name: String) -> Error:
 	_set_status("Connecting to %s:%d…" % [join_ip, PORT])
 	return OK
 
+func _host_webrtc() -> Error:
+	_use_webrtc = true
+	_rtc = WebRTCMultiplayerPeer.new()
+	var err: Error = _rtc.create_server()
+	if err != OK:
+		_set_status("WebRTC host failed (%d)." % err)
+		return err
+	multiplayer.multiplayer_peer = _rtc
+	_mark_host_ready()
+	_uid = "host"
+	_next_peer_id = 2
+	_start_mqtt(lobby.lobby_code)
+	_set_status("Table code %s — others Join with this code on the same page." % lobby.lobby_code)
+	lobby_changed.emit()
+	return OK
+
+func _join_webrtc(code: String) -> Error:
+	_use_webrtc = true
+	join_code = code.strip_edges().to_upper()
+	if join_code.length() != 4:
+		_set_status("Need the host’s 4-letter table code.")
+		return ERR_INVALID_PARAMETER
+	_uid = "j%s%d" % [join_code, randi() % 100000]
+	active = true
+	is_host = false
+	local_seat = -1
+	_set_status("Looking for table %s…" % join_code)
+	_start_mqtt(join_code)
+	return OK
+
+func _mark_host_ready() -> void:
+	active = true
+	is_host = true
+	local_seat = 0
+	peer_seat[1] = 0
+	seat_peer[0] = 1
+	_bind_multiplayer()
+
+func _start_mqtt(code: String) -> void:
+	if _mqtt == null:
+		_mqtt = MqttWs.new()
+		_mqtt.name = "MqttWs"
+		add_child(_mqtt)
+		_mqtt.connected.connect(_on_mqtt_connected)
+		_mqtt.failed.connect(_on_mqtt_failed)
+		_mqtt.message.connect(_on_mqtt_message)
+	var cid: String = "pres-%s-%d" % [code.to_upper(), Time.get_ticks_msec() % 100000]
+	_mqtt.start(MqttWs.topic_for(code), cid)
+
+func _on_mqtt_connected() -> void:
+	if is_host:
+		_sig_pub({"t": "host", "name": local_name, "code": lobby.lobby_code if lobby else ""})
+		_set_status("Live. Table code %s — share it." % (lobby.lobby_code if lobby else join_code))
+	else:
+		_sig_pub({"t": "join", "uid": _uid, "name": local_name})
+		_set_status("Sat in the waiting room for %s…" % join_code)
+
+func _on_mqtt_failed(reason: String) -> void:
+	_set_status("Could not reach a signaling broker. %s" % reason)
+	if not is_host:
+		close()
+		status_changed.emit()
+
+func _sig_pub(d: Dictionary) -> void:
+	if _mqtt:
+		_mqtt.publish(JSON.stringify(d))
+
+func _on_mqtt_message(_topic: String, payload: String) -> void:
+	var parsed: Variant = JSON.parse_string(payload)
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return
+	var msg: Dictionary = parsed
+	var kind: String = str(msg.get("t", ""))
+	match kind:
+		"join":
+			if is_host:
+				_host_got_join(msg)
+		"assign":
+			if not is_host and str(msg.get("uid", "")) == _uid:
+				_client_got_assign(int(msg.get("id", 0)))
+		"offer":
+			_got_sdp("offer", msg)
+		"answer":
+			_got_sdp("answer", msg)
+		"ice":
+			_got_ice(msg)
+		"host":
+			if not is_host and _rtc == null:
+				_sig_pub({"t": "join", "uid": _uid, "name": local_name})
+
+func _host_got_join(msg: Dictionary) -> void:
+	if in_match:
+		return
+	var uid: String = str(msg.get("uid", ""))
+	if uid == "" or uid == "host":
+		return
+	if _seen_uids.has(uid):
+		return
+	_seen_uids[uid] = true
+	var id: int = _next_peer_id
+	_next_peer_id += 1
+	_create_rtc_peer(id)
+	_sig_pub({"t": "assign", "uid": uid, "id": id})
+	_set_status("Linking a joiner as peer %d…" % id)
+
+func _client_got_assign(id: int) -> void:
+	if id < 2:
+		_set_status("Host rejected the sit-down.")
+		return
+	if _rtc != null:
+		return
+	_rtc = WebRTCMultiplayerPeer.new()
+	var err: Error = _rtc.create_client(id)
+	if err != OK:
+		_set_status("WebRTC client failed (%d)." % err)
+		return
+	multiplayer.multiplayer_peer = _rtc
+	_bind_multiplayer()
+	_create_rtc_peer(1)
+	_flush_pending()
+	_set_status("Negotiating a private table link…")
+
+func _create_rtc_peer(id: int) -> WebRTCPeerConnection:
+	var peer: WebRTCPeerConnection = WebRTCPeerConnection.new()
+	peer.initialize(STUN)
+	peer.session_description_created.connect(func(type: String, sdp: String) -> void:
+		if _rtc == null or not _rtc.has_peer(id):
+			return
+		_rtc.get_peer(id).connection.set_local_description(type, sdp)
+		if type == "offer":
+			_sig_pub({"t": "offer", "from": _rtc.get_unique_id(), "to": id, "sdp": sdp})
+		else:
+			_sig_pub({"t": "answer", "from": _rtc.get_unique_id(), "to": id, "sdp": sdp})
+	)
+	peer.ice_candidate_created.connect(func(mid: String, index: int, sdp: String) -> void:
+		if _rtc == null:
+			return
+		_sig_pub({
+			"t": "ice",
+			"from": _rtc.get_unique_id(),
+			"to": id,
+			"mid": mid,
+			"index": index,
+			"sdp": sdp,
+		})
+	)
+	_rtc.add_peer(peer, id)
+	if id < _rtc.get_unique_id():
+		peer.create_offer()
+	return peer
+
+func _got_sdp(kind: String, msg: Dictionary) -> void:
+	if _rtc == null:
+		_pending.append(msg)
+		return
+	var from_id: int = int(msg.get("from", 0))
+	var to_id: int = int(msg.get("to", 0))
+	if to_id != 0 and to_id != _rtc.get_unique_id():
+		return
+	if not _rtc.has_peer(from_id):
+		_pending.append(msg)
+		return
+	_rtc.get_peer(from_id).connection.set_remote_description(kind, str(msg.get("sdp", "")))
+
+func _got_ice(msg: Dictionary) -> void:
+	if _rtc == null:
+		_pending.append(msg)
+		return
+	var from_id: int = int(msg.get("from", 0))
+	var to_id: int = int(msg.get("to", 0))
+	if to_id != 0 and to_id != _rtc.get_unique_id():
+		return
+	if not _rtc.has_peer(from_id):
+		_pending.append(msg)
+		return
+	_rtc.get_peer(from_id).connection.add_ice_candidate(
+		str(msg.get("mid", "")), int(msg.get("index", 0)), str(msg.get("sdp", "")))
+
+func _flush_pending() -> void:
+	var left: Array = _pending.duplicate()
+	_pending.clear()
+	for m in left:
+		var msg: Dictionary = m
+		var kind: String = str(msg.get("t", ""))
+		if kind == "offer" or kind == "answer":
+			_got_sdp(kind, msg)
+		elif kind == "ice":
+			_got_ice(msg)
+
+func _process(_delta: float) -> void:
+	if _rtc == null:
+		return
+	for pid in _rtc.get_peers().keys():
+		var info: Dictionary = _rtc.get_peer(int(pid))
+		if info.has("connection") and info["connection"] is WebRTCPeerConnection:
+			(info["connection"] as WebRTCPeerConnection).poll()
+
 func close() -> void:
 	_unbind_multiplayer()
+	if _mqtt != null:
+		_mqtt.stop()
+	if _rtc != null:
+		_rtc.close()
+		_rtc = null
 	if multiplayer.multiplayer_peer != null:
 		multiplayer.multiplayer_peer.close()
 		multiplayer.multiplayer_peer = null
 	active = false
 	is_host = false
 	in_match = false
+	_use_webrtc = false
 	local_seat = 0
 	peer_seat.clear()
 	seat_peer.clear()
 	last_snapshot.clear()
+	_pending.clear()
+	_seen_uids.clear()
+	_next_peer_id = 2
 
 func _bind_multiplayer() -> void:
 	_unbind_multiplayer()
@@ -151,6 +376,8 @@ func _on_peer_disconnected(id: int) -> void:
 		return
 	var seat: int = seat_of_peer(id)
 	peer_seat.erase(id)
+	if _rtc != null and _rtc.has_peer(id):
+		_rtc.remove_peer(id)
 	if seat > 0:
 		seat_peer.erase(seat)
 		if lobby != null:
@@ -165,7 +392,10 @@ func _on_connected_to_server() -> void:
 	hello.rpc_id(1, PROTOCOL, local_name)
 
 func _on_connection_failed() -> void:
-	_set_status("No host at %s:%d." % [join_ip, PORT])
+	if _use_webrtc:
+		_set_status("Could not punch a WebRTC path to the host. Try the same Wi-Fi.")
+	else:
+		_set_status("No host at %s:%d." % [join_ip, PORT])
 	close()
 	status_changed.emit()
 
@@ -266,9 +496,12 @@ func kick_seat(seat: int) -> void:
 	if not is_host or seat <= 0:
 		return
 	var pid: int = int(seat_peer.get(seat, -1))
-	if pid > 1 and multiplayer.multiplayer_peer != null:
+	if pid > 1:
 		reject.rpc_id(pid, "Host dropped you.")
-		multiplayer.multiplayer_peer.disconnect_peer(pid)
+		if _rtc != null and _rtc.has_peer(pid):
+			_rtc.remove_peer(pid)
+		elif multiplayer.multiplayer_peer != null:
+			multiplayer.multiplayer_peer.disconnect_peer(pid)
 		return
 	if lobby != null:
 		lobby.release_lan_seat(seat)

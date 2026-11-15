@@ -527,8 +527,14 @@ func _init() -> void:
 	var packed_l: Dictionary = lan.to_dict()
 	var lan2: LobbyConfig = LobbyConfig.from_dict(packed_l)
 	_check(lan2.lan and lan2.name_of(0) == "Hayden" and lan2.name_of(1) == "Ada", "lobby dict round-trips")
-	_check(NetSession.lan_supported() == (not OS.has_feature("web")), "LAN flag matches the export")
-	_check(NetSession.PORT == 24567, "LAN port is 24567")
+	_check(NetSession.lan_supported(), "a table can be hosted from this build")
+	_check(NetSession.uses_webrtc() == OS.has_feature("web"), "web uses WebRTC, desktop uses ENet")
+	_check(NetSession.PORT == 24567, "desktop LAN port is 24567")
+	_check(MqttWs.topic_for("ab12") == "continuity-president/AB12", "MQTT topic uppercases the table code")
+	var rem: PackedByteArray = MqttWs.encode_remaining_length(0)
+	_check(rem.size() == 1 and rem[0] == 0, "MQTT remaining length 0")
+	var rem2: PackedByteArray = MqttWs.encode_remaining_length(200)
+	_check(rem2.size() == 2 and rem2[0] == 200 and rem2[1] == 1, "MQTT remaining length 200")
 
 	var cpack: CardData = CardData.new(12, 2, true)
 	cpack.enhancement = "steel"

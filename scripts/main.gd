@@ -1,6 +1,6 @@
 extends Control
 
-## President. Title → Solo vs AIs, local hotseat, or desktop LAN (host = P1).
+## President. Title → Solo vs AIs, hotseat lobby, or a joinable table (host = P1).
 
 signal trade_confirmed
 
@@ -330,16 +330,14 @@ func _on_solo() -> void:
 
 func _on_open_lobby() -> void:
 	_title_view.visible = false
-	var as_lan: bool = NetSession.lan_supported()
-	_lobby_view.present(true, as_lan)
-	if as_lan:
-		lobby = _lobby_view.config
-		var err: Error = _net.host_listen(lobby, _lobby_view.host_player_name())
+	_lobby_view.present(true, true)
+	lobby = _lobby_view.config
+	var err: Error = _net.host_listen(lobby, _lobby_view.host_player_name())
+	_lobby_view.set_lan_status(_net.status)
+	if err != OK:
+		lobby.lan = false
+		_lobby_view.lan_host = false
 		_lobby_view.set_lan_status(_net.status)
-		if err != OK:
-			lobby.lan = false
-			_lobby_view.lan_host = false
-			_lobby_view.set_lan_status(_net.status)
 
 func _on_open_join() -> void:
 	_title_view.visible = false

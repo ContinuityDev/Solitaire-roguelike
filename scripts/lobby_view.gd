@@ -148,9 +148,12 @@ func present(fresh: bool = true, as_lan: bool = false) -> void:
 		config.set_display_name(0, "You")
 	_name_edit.text = config.lobby_name
 	_you_edit.text = config.name_of(0)
-	_title_lab.text = "LAN TABLE" if lan_host else "LOCAL LOBBY"
+	_title_lab.text = "THE TABLE" if lan_host else "LOCAL LOBBY"
 	if lan_host:
-		_hint.text = "You are player one. Joiners on this Wi-Fi take empty seats. Leftover seats stay AIs. Hotseat Human toggles stay for people on this device."
+		if NetSession.uses_webrtc():
+			_hint.text = "You are player one. Share the gold 4-letter code. Another browser opens Join Table, types the code and a name. Leftover seats stay AIs."
+		else:
+			_hint.text = "You are player one. Desktop LAN on UDP 24567. Joiners type your IP. Leftover seats stay AIs."
 	else:
 		_hint.text = "Pass-the-device on this phone or desktop. Empty seats become AIs when you toggle Fill."
 	_rebuild()
@@ -185,8 +188,8 @@ func _rebuild() -> void:
 	_start_btn.disabled = not ok
 	if ok:
 		if lan_host:
-			_status.text = "%d human  ·  %d AI  ·  you lead as player one" % [
-				config.human_count(), config.ai_seats().size()]
+			_status.text = "%d human  ·  %d AI  ·  code %s  ·  you are player one" % [
+				config.human_count(), config.ai_seats().size(), config.lobby_code]
 		else:
 			_status.text = "%d human  ·  %d AI  ·  hotseat %s" % [
 				config.human_count(), config.ai_seats().size(),

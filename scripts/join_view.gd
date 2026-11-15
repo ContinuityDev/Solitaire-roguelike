@@ -1,10 +1,10 @@
 class_name JoinView
 extends Control
 
-## Type a name, type the host IP, sit down. Desktop ENet only.
+## Type a name and the host’s table code (web) or IP (desktop).
 
 signal cancelled
-signal connect_pressed(ip: String, player_name: String)
+signal connect_pressed(target: String, player_name: String)
 
 var _name_edit: LineEdit
 var _ip_edit: LineEdit
@@ -31,12 +31,12 @@ func _ready() -> void:
 	col.add_theme_constant_override("separation", 8)
 	pad.add_child(col)
 	var title: Label = Label.new()
-	title.text = "JOIN LAN"
+	title.text = "JOIN TABLE"
 	title.add_theme_font_size_override("font_size", 22)
 	title.add_theme_color_override("font_color", Color(0.92, 0.78, 0.35))
 	col.add_child(title)
 	_hint = Label.new()
-	_hint.text = "Same Wi-Fi as the host. Host is player one. You pick a name and take the next empty seat."
+	_hint.text = "Host is player one. Type your name and their 4-letter table code (same web page, two phones or two tabs)."
 	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_hint.add_theme_font_size_override("font_size", 12)
 	_hint.add_theme_color_override("font_color", Color(0.72, 0.76, 0.84))
@@ -57,18 +57,15 @@ func _ready() -> void:
 	ip_row.add_theme_constant_override("separation", 8)
 	col.add_child(ip_row)
 	var il: Label = Label.new()
-	il.text = "Host"
+	il.text = "Code"
 	il.custom_minimum_size = Vector2(52, 0)
+	il.name = "TargetLab"
 	ip_row.add_child(il)
 	_ip_edit = LineEdit.new()
-	_ip_edit.placeholder_text = "127.0.0.1"
-	_ip_edit.text = "127.0.0.1"
+	_ip_edit.placeholder_text = "ABCD"
 	_ip_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_ip_edit.max_length = 18
 	ip_row.add_child(_ip_edit)
-	var port_l: Label = Label.new()
-	port_l.text = ":%d" % NetSession.PORT
-	port_l.add_theme_color_override("font_color", Color(0.98, 0.90, 0.55))
-	ip_row.add_child(port_l)
 	_status = Label.new()
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.add_theme_font_size_override("font_size", 12)
@@ -101,12 +98,24 @@ func _ready() -> void:
 func present() -> void:
 	if _name_edit.text.strip_edges() == "":
 		_name_edit.text = "Guest"
-	_status.text = "UDP port %d. Two windows on this machine: use 127.0.0.1." % NetSession.PORT
-	if not NetSession.lan_supported():
-		_status.text = "This web page cannot join LAN. Open the desktop Godot build."
-		_connect_btn.disabled = true
+	_connect_btn.disabled = false
+	_connect_btn.text = "Sit down"
+	var lab: Label = _ip_edit.get_parent().get_node_or_null("TargetLab") as Label
+	if NetSession.uses_webrtc():
+		_hint.text = "Open this same page on another phone or tab. Type the host’s 4-letter table code and your name."
+		_ip_edit.placeholder_text = "ABCD"
+		_ip_edit.max_length = 4
+		if lab:
+			lab.text = "Code"
+		_status.text = "Same Wi-Fi is most reliable. Hard NATs may fail (no TURN server)."
 	else:
-		_connect_btn.disabled = false
+		_hint.text = "Desktop LAN. Host is player one. Type their IP (127.0.0.1 for two windows on this machine)."
+		_ip_edit.placeholder_text = "127.0.0.1"
+		_ip_edit.text = "127.0.0.1"
+		_ip_edit.max_length = 40
+		if lab:
+			lab.text = "Host"
+		_status.text = "UDP port %d." % NetSession.PORT
 	_rebuild_roster(null)
 	visible = true
 
@@ -117,8 +126,6 @@ func player_name() -> String:
 	return _name_edit.text.strip_edges()
 
 func _on_connect() -> void:
-	if not NetSession.lan_supported():
-		return
 	connect_pressed.emit(_ip_edit.text.strip_edges(), player_name())
 
 func _rebuild_roster(cfg: LobbyConfig, my_seat: int = -1) -> void:

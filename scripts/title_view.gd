@@ -52,13 +52,13 @@ func _ready() -> void:
 	spacer.custom_minimum_size = Vector2(0, 18)
 	col.add_child(spacer)
 	col.add_child(_mode_btn("Solo  /  vs AIs", "You versus five cabinet AIs. Same President run as before.", func() -> void: solo_pressed.emit()))
-	col.add_child(_mode_btn("Local Lobby", "Host 2–6 seats. Hotseat on this device, or LAN listen on desktop (you are player one).", func() -> void: lobby_pressed.emit()))
-	col.add_child(_mode_btn("Join LAN", "Sit at a host on this Wi-Fi. Rename yourself. Desktop Godot only — not the web page.", func() -> void: join_pressed.emit()))
+	col.add_child(_mode_btn("Local Lobby", "Host 2–6 seats. You are player one — rename yourself. Share the 4-letter table code. Empty seats stay AIs. Hotseat still works on this device.", func() -> void: lobby_pressed.emit()))
+	col.add_child(_mode_btn("Join Table", "Another browser, same page. Type the host’s table code and your name.", func() -> void: join_pressed.emit()))
 	var foot: Label = Label.new()
-	if NetSession.lan_supported():
-		foot.text = "LAN is UDP %d. Two windows on one machine: join 127.0.0.1." % NetSession.PORT
+	if NetSession.uses_webrtc():
+		foot.text = "Two phones or two tabs: host a lobby, share the code, Join Table. Peer-to-peer WebRTC — no install."
 	else:
-		foot.text = "This web page is pass-the-device. LAN host/join needs the desktop Godot build."
+		foot.text = "Desktop LAN is UDP %d (join by IP). The web page uses a table code instead." % NetSession.PORT
 	foot.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	foot.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	foot.add_theme_font_size_override("font_size", 11)
