@@ -3,8 +3,12 @@ extends RefCounted
 
 ## Standard French ranks. President power is 3-low through Ace, with 2s
 ## sitting above Ace as the bomb rank. Rank 0 is a Joker (round-ender).
+## Ranks 16+ are "super" faces used by round inflation and uncapped promotes;
+## their follow power equals the rank number (so they climb past bombs).
 
 const JOKER: int = 0
+## First rank id above the classic bomb (power 15). Power N (>=16) ↔ rank N.
+const SUPER_MIN: int = 16
 
 const NAMES: Dictionary = {
 	0: "Joker",
@@ -26,21 +30,31 @@ const SHORT: Dictionary = {
 static func is_joker(rank: int) -> bool:
 	return rank == JOKER
 
+static func is_super(rank: int) -> bool:
+	return rank >= SUPER_MIN
+
 static func short_label(rank: int) -> String:
 	if SHORT.has(rank):
 		return str(SHORT[rank])
+	if rank >= 1000 or rank <= -1000:
+		return NumFormat.compact(rank)
 	return str(rank)
 
 static func full_name(rank: int) -> String:
 	if NAMES.has(rank):
 		return str(NAMES[rank])
+	if is_super(rank):
+		return "Rank %s" % NumFormat.compact(rank)
 	return str(rank)
 
 ## President shedding power. 3 is weakest, Ace is high, 2 is the bomb.
+## Super ranks (16+) use their id as power so inflation can climb forever.
 ## Jokers are not a follow rank (they end the round); sort them last.
 static func president_power(rank: int) -> int:
 	if is_joker(rank):
 		return 100
+	if is_super(rank):
+		return rank
 	if rank == 2:
 		return 15
 	if rank == 1:
@@ -50,8 +64,11 @@ static func president_power(rank: int) -> int:
 static func is_bomb(rank: int) -> bool:
 	return rank == 2
 
+## Map follow-power back to a face rank. 16+ stay as super ranks (not bombs).
 static func rank_from_power(p: int) -> int:
-	if p >= 15:
+	if p >= SUPER_MIN:
+		return p
+	if p == 15:
 		return 2
 	if p == 14:
 		return 1
@@ -60,33 +77,55 @@ static func rank_from_power(p: int) -> int:
 static func copies_in_deck(rank: int) -> int:
 	return 2 if is_joker(rank) else 4
 
-## Map a follow-power number back to a face label. 16+ is a bomb with extra
-## weight (Heavier Bombs) — there is no rank above 2, so that reads "2+".
+## Map a follow-power number back to a face label. Classic 16 was "2+" for a
+## single Heavier Bombs bind; once power climbs further, show the number.
 static func short_label_for_power(p: int) -> String:
-	if p >= 16:
+	if p == 16:
 		return "2+"
+	if p > 16:
+		return NumFormat.compact(p) if p >= 1000 else str(p)
 	if p == 15:
 		return "2"
 	if p == 14:
 		return "A"
 	if p >= 1 and p <= 13:
 		return short_label(p)
-	return str(p)
+	return NumFormat.compact(p) if absi(p) >= 1000 else str(p)
 
 ## Face vs effective follow value. `power_bonus` is the seat-scoped +power bind
 ## (Strong Fives, Ace Authority, …). Promotions/Forge keep `origin_rank`.
-## `{printed, shown, buffed}` — `printed` is the source rank (always drawn in
-## suit color); `shown` is the true follow value (blue badge when buffed).
+## `{printed, shown, buffed}` — `printed` is the deal-face / origin (suit color);
+## `shown` is the true follow value (always drawn in blue when it differs).
 static func buff_display(card: CardData, power_bonus: int = 0) -> Dictionary:
 	if card == null:
 		return {"shown": "", "printed": "", "small": "", "buffed": false, "power": 0}
 	var face: int = card.rank
 	var origin: int = card.origin_rank if card.origin_rank > 0 else face
+	var base: int = card.base_rank if card.base_rank > 0 else origin
 	var power: int = president_power(face) + maxi(0, power_bonus)
-	var shown: String = short_label_for_power(power)
-	var face_lab: String = short_label(face)
-	var origin_lab: String = short_label(origin)
-	var buffed: bool = power > president_power(origin)
-	var printed: String = origin_lab if origin != face else face_lab
-	var small: String = printed if buffed and printed != shown else ""
+	var shown: String = _shown_for(face, power)
+	# Deal-face when available so inflated/upgraded cards still show their root.
+	var printed: String = short_label(base)
+	# If promote changed origin away from base without inflation, prefer origin.
+	if origin > 0 and origin != face and origin != base and not is_super(face):
+		printed = short_label(origin)
+	var buffed: bool = shown != printed
+	var small: String = printed if buffed else ""
 	return {"shown": shown, "printed": printed, "small": small, "buffed": buffed, "power": power}
+
+static func _shown_for(face: int, power: int) -> String:
+	# Only super *faces* use raw numeric labels. A classic bomb with +power
+	# (Heavier Bombs → power 16) still reads as "2+" via short_label_for_power.
+	if is_super(face):
+		if power >= 1000:
+			return NumFormat.compact(power)
+		return str(power)
+	return short_label_for_power(power)
+
+## Inflate a classic (or already-scaled) rank by adding `bonus` to its follow
+## power, then mapping back to a face. Preserves relative order so N-of-a-kind
+## of the same pre-inflation rank stay matched.
+static func inflate_rank(rank: int, bonus: int) -> int:
+	if is_joker(rank) or bonus <= 0:
+		return rank
+	return rank_from_power(president_power(rank) + bonus)

@@ -183,6 +183,8 @@ func _build_ui() -> void:
 	_shop.bought_upgrade.connect(_on_buy_upgrade)
 	_shop.bought_action.connect(_on_buy_action)
 	_shop.bought_enhancement.connect(_on_buy_enhancement)
+	_shop.bought_rank_fx.connect(_on_buy_rank_fx)
+	_shop.bought_combo.connect(_on_buy_combo)
 	_shop.reroll_pressed.connect(_on_shop_reroll)
 	_shop.closed.connect(_on_shop_closed)
 	var resh: CenterContainer = CenterContainer.new()
@@ -311,10 +313,11 @@ func _local_seat() -> int:
 func _playing() -> bool:
 	return _table_layer != null and _table_layer.visible
 
-func _rank_power_bonus(seat: int, rank: int) -> int:
+func _rank_power_bonus(seat: int, rank: int, base_rank: int = -1) -> int:
 	if run == null:
 		return 0
-	return run.rank_power_bonus(seat, rank)
+	var key: int = base_rank if base_rank > 0 else rank
+	return run.rank_power_bonus(seat, key)
 
 func _show_screen(which: String) -> void:
 	if _table_layer:
@@ -546,17 +549,24 @@ func _start_round() -> void:
 		_show_run_over()
 		_lan_push()
 		return
+	# Endless: keep the cabinet seated so a depleted AI table cannot soft-end.
+	run.revive_cabinet()
 	var live: Array = run.living_seats()
 	if live.size() < 2:
+		# Only reachable if the lobby itself has <2 seats configured.
+		run.run_over = true
+		run.run_won = false
+		RunManager.record_best_round(run.round_n)
 		_show_run_over()
 		return
 	run.apply_populist()
 	game.setup(live, run.rng, 0, 0, 0, run.lead_seat())
 	var deal_logs: Array = run.apply_deal_effects(game)
 	if _is_human(game.current_player):
-		_message("Round %d. Stake %d. %s leads — yellow cards can be played." % [run.round_n, run.stake(), run.name_of(game.current_player)])
+		_message("Round %d · Ante %d · Stake %d · Rank+%s. %s leads — yellow cards can be played." % [
+			run.round_n, run.ante(), run.stake(), NumFormat.compact(run.rank_bonus()), run.name_of(game.current_player)])
 	else:
-		_message("Round %d. %s leads." % [run.round_n, run.name_of(game.current_player)])
+		_message("Round %d · Ante %d. %s leads." % [run.round_n, run.ante(), run.name_of(game.current_player)])
 	if not deal_logs.is_empty():
 		for line in deal_logs:
 			run.log_event(str(line))
@@ -678,7 +688,11 @@ func _ai_act() -> void:
 		_continue_turns()
 		return
 	var combo: Dictionary = choice["combo"]
-	var origins: Array = _seat_origins(seat, int(combo.get("count", 1)))
+	var play_rank: int = int(combo.get("rank", 0))
+	var play_base: int = game.base_of_rank(seat, play_rank)
+	var play_count: int = int(combo.get("count", 1))
+	var was_lead: bool = game.lead
+	var origins: Array = _seat_origins(seat, play_count)
 	var r: Dictionary = game.play(seat, combo)
 	if not bool(r.get("ok", false)):
 		game.pass_turn(seat)
@@ -688,7 +702,7 @@ func _ai_act() -> void:
 		_lan_push()
 		_continue_turns()
 		return
-	_award_rank_gold(seat, int(combo.get("rank", 0)))
+	_fire_rank_play(seat, play_base, play_count, was_lead, bool(r.get("finished", false)))
 	_message("%s plays %s." % [run.name_of(seat), str(r.get("label", ""))])
 	await _fly_from(origins, combo, seat)
 	_refresh()
@@ -704,7 +718,9 @@ func _on_play() -> void:
 		_message("Tap a yellow card first.")
 		return
 	var rank: int = (_selected[0] as CardData).rank
+	var base_rank: int = (_selected[0] as CardData).base_rank if (_selected[0] as CardData).base_rank > 0 else rank
 	var combo: Dictionary = {"rank": rank, "count": _selected.size()}
+	var was_lead: bool = game.lead
 	if not game.is_legal_combo(combo, _view_seat):
 		_message("Need %d of that rank to follow." % game.trick_count if not game.lead else "Illegal combo.")
 		return
@@ -720,7 +736,7 @@ func _on_play() -> void:
 		_message("Illegal play (%s)." % str(r.get("reason", "")))
 		return
 	_selected.clear()
-	_award_rank_gold(_view_seat, rank)
+	_fire_rank_play(_view_seat, base_rank, int(combo["count"]), was_lead, bool(r.get("finished", false)))
 	_message("%s plays %s." % [run.name_of(_view_seat), str(r.get("label", ""))])
 	_busy = true
 	await _fly_from(origins, combo, _view_seat)
@@ -872,14 +888,64 @@ func _pop_pass(seat: int) -> void:
 			chip.queue_free()
 	)
 
-func _award_rank_gold(seat: int, rank: int) -> void:
-	var n: int = run.rank_gold_on_play(seat, rank)
-	if n <= 0:
+func _fire_rank_play(seat: int, base_rank: int, count: int = 1, is_lead: bool = false, last_card: bool = false) -> void:
+	if base_rank < 0:
 		return
-	run.add_gold(seat, n)
-	var who: String = run.name_of(seat)
-	run.log_event("%s earns $%d on %s." % [who, n, RankSystem.short_label(rank)])
-	_pop_gold(seat, n)
+	var hand: Array = game.hand_of(seat)
+	var res: Dictionary = run.trigger_rank_play(seat, base_rank, hand, count, is_lead, last_card)
+	if int(res.get("gold", 0)) > 0:
+		_pop_gold(seat, int(res["gold"]))
+	if int(res.get("chips", 0)) > 0:
+		_pop_chips(seat, int(res["chips"]))
+	if int(res.get("damage", 0)) > 0:
+		_pop_damage(int(res.get("target", -1)), int(res["damage"]))
+	if int(res.get("retriggers", 0)) > 0:
+		_message("%s retrigger ×%d." % [run.name_of(seat), int(res["retriggers"]) + 1])
+
+func _pop_chips(seat: int, n: int) -> void:
+	var chip: Label = Label.new()
+	chip.text = "◈ +%d" % n
+	chip.add_theme_font_size_override("font_size", 18)
+	chip.add_theme_color_override("font_color", Color(0.45, 0.92, 1.0))
+	chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	chip.z_index = 50
+	_fly_layer.add_child(chip)
+	var pos: Vector2 = _trick_dest() + Vector2(10, -12)
+	if seat != _view_seat:
+		var pl: Control = _plaque_for(seat)
+		if pl != null:
+			pos = pl.global_position + Vector2(20, 8)
+	chip.global_position = pos
+	var tw: Tween = create_tween()
+	tw.tween_property(chip, "global_position", pos + Vector2(0, -30), 0.7)
+	tw.parallel().tween_property(chip, "modulate:a", 0.0, 0.7)
+	tw.tween_callback(func() -> void:
+		if is_instance_valid(chip):
+			chip.queue_free()
+	)
+
+func _pop_damage(target: int, n: int) -> void:
+	if target < 0:
+		return
+	var chip: Label = Label.new()
+	chip.text = "⚔ −%d" % n
+	chip.add_theme_font_size_override("font_size", 16)
+	chip.add_theme_color_override("font_color", Color(1.0, 0.35, 0.32))
+	chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	chip.z_index = 50
+	_fly_layer.add_child(chip)
+	var pos: Vector2 = Vector2(size.x * 0.4, 120)
+	var pl: Control = _plaque_for(target)
+	if pl != null:
+		pos = pl.global_position + Vector2(24, 10)
+	chip.global_position = pos
+	var tw: Tween = create_tween()
+	tw.tween_property(chip, "global_position", pos + Vector2(0, -26), 0.65)
+	tw.parallel().tween_property(chip, "modulate:a", 0.0, 0.65)
+	tw.tween_callback(func() -> void:
+		if is_instance_valid(chip):
+			chip.queue_free()
+	)
 
 func _pop_gold(seat: int, n: int) -> void:
 	var wrap: Control = Control.new()
@@ -970,7 +1036,10 @@ func _float_payouts() -> void:
 		var seat: int = int(d["seat"])
 		var chip: Label = Label.new()
 		var hp_d: int = int(d["hp_delta"])
-		chip.text = ("%+d HP" % hp_d) + ("  +$%d" % int(d["gold"]) if int(d["gold"]) > 0 else "")
+		var chip_n: int = int(d.get("chips", 0))
+		chip.text = ("%+d HP" % hp_d) \
+			+ ("  +$%d" % int(d["gold"]) if int(d["gold"]) > 0 else "") \
+			+ ("  +◈%d" % chip_n if chip_n > 0 else "")
 		chip.add_theme_font_size_override("font_size", 14)
 		chip.add_theme_color_override("font_color", Color(0.4, 1.0, 0.5) if hp_d >= 0 else Color(1.0, 0.4, 0.35))
 		_fly_layer.add_child(chip)
@@ -1000,7 +1069,31 @@ func _on_buy_upgrade(item: Dictionary) -> void:
 		_reopen_shop()
 		_lan_push()
 	else:
-		_message("Not enough gold.")
+		_message("Not enough %s." % ("chips" if UpgradeDB.currency_of(item) == "chips" else "gold"))
+
+func _on_buy_rank_fx(item: Dictionary) -> void:
+	if not _is_authority():
+		_net.send_intent({"kind": "shop_buy", "buy": "rank_fx", "id": str(item["id"])})
+		return
+	if run.buy_upgrade(str(item["id"]), int(item["price"])):
+		run.take_shop_offer(str(item["id"]))
+		_message("Customized: %s." % str(item["name"]))
+		_reopen_shop()
+		_lan_push()
+	else:
+		_message("Not enough Survivor Chips.")
+
+func _on_buy_combo(item: Dictionary) -> void:
+	if not _is_authority():
+		_net.send_intent({"kind": "shop_buy", "buy": "combo", "id": str(item["id"])})
+		return
+	if run.buy_upgrade(str(item["id"]), int(item["price"])):
+		run.take_shop_offer(str(item["id"]))
+		_message("Combo: %s." % str(item["name"]))
+		_reopen_shop()
+		_lan_push()
+	else:
+		_message("Not enough %s." % ("chips" if UpgradeDB.currency_of(item) == "chips" else "gold"))
 
 func _on_buy_action(item: Dictionary) -> void:
 	if not _is_authority():
@@ -1050,7 +1143,14 @@ func _open_shop_for(seat: int) -> void:
 
 func _reopen_shop() -> void:
 	var s: int = run.shop_seat
-	_shop.present(run.gold_of(s), _priced_offers_for(s), run.owned_counts_of(s), run.reroll_cost(), "%s  ·  Gold $%d  ·  HP %d/%d  ·  %d offers" % [run.name_of(s), run.gold_of(s), int(run.hp[s]), int(run.seat_max_hp[s]), run.shop_offers.size()])
+	_shop.present(
+		run.gold_of(s),
+		_priced_offers_for(s),
+		run.owned_counts_of(s),
+		run.reroll_cost(),
+		"%s  ·  $%d  ·  ◈%d  ·  HP %d/%d  ·  %d offers" % [
+			run.name_of(s), run.gold_of(s), run.chips_of(s), int(run.hp[s]), int(run.seat_max_hp[s]), run.shop_offers.size()],
+		run.chips_of(s))
 
 func _priced_offers_for(seat: int) -> Array:
 	var out: Array = []
@@ -1105,7 +1205,8 @@ func _tribute_preview() -> String:
 
 func _show_results() -> void:
 	_desk_phase = "table"
-	var title: String = "Round %d  ·  stake %d" % [run.round_n, run.stake()]
+	var title: String = "Round %d  ·  ante %d  ·  stake %d  ·  rank+%s" % [
+		run.round_n, run.ante(), run.stake(), NumFormat.compact(run.rank_bonus())]
 	var log_text: String = "\n".join(run.trade_log) if not run.trade_log.is_empty() else ""
 	var acts: Array = [] if _is_hotseat() else run.result_action_ids_of(_view_seat)
 	_results.present_round(title, _results_rows(), _tribute_preview(), log_text, acts, true)
@@ -1237,14 +1338,10 @@ func _toggle_trade_pick(card: CardData) -> void:
 	_sync_hand()
 
 func _show_run_over() -> void:
-	var winner: String = ""
-	if run.run_won:
-		var live: Array = run.living_seats()
-		winner = run.name_of(int(live[0])) if not live.is_empty() else run.name_of(_view_seat)
-	var title: String = ("%s HOLDS THE OVAL" % winner) if run.run_won else "REMOVED FROM OFFICE"
-	var body: String = "%s lasted %d round(s). Gold in pocket: %d.\n%s" % [
-		run.name_of(_view_seat), run.round_n, run.gold_of(_view_seat),
-		"Last seat standing." if run.run_won else "The humans are out. The cabinet remains."]
+	var best: int = RunManager.load_best_round()
+	var title: String = "REMOVED FROM OFFICE"
+	var body: String = "%s reached round %d (ante %d).\nGold in pocket: %d. Best run: round %d.\nThe cabinet outlasted you — there is no final win." % [
+		run.name_of(_view_seat), run.round_n, run.ante(), run.gold_of(_view_seat), best]
 	_results.present_game_over(title, _results_rows(), body)
 
 func _show_overlay(title_text: String, body: String, actions: Array) -> void:
@@ -1278,8 +1375,9 @@ func _refresh_hud() -> void:
 	var role_bit: String = "  %s" % role if not run.living_finish().is_empty() else ""
 	var bind: String = run.rank_mod_short(_view_seat)
 	var s: int = _view_seat
-	_hud.text = "%s  Round %d  Stake %d  HP %d/%d  Gold %d  Living %d%s%s" % [
-		run.name_of(s), run.round_n, run.stake(), int(run.hp[s]), int(run.seat_max_hp[s]), run.gold_of(s), run.living_seats().size(), role_bit, bind]
+	_hud.text = "%s  R%d  Ante %d  Stake %d  Rank+%s  HP %d/%d  $%d  ◈%d  Live %d%s%s" % [
+		run.name_of(s), run.round_n, run.ante(), run.stake(), NumFormat.compact(run.rank_bonus()),
+		int(run.hp[s]), int(run.seat_max_hp[s]), run.gold_of(s), run.chips_of(s), run.living_seats().size(), role_bit, bind]
 
 func _set_buttons() -> void:
 	var yours: bool = game.current_player == _view_seat and _is_human(_view_seat) and not game.round_over and not _busy and not _trade_waiting
@@ -1455,7 +1553,9 @@ func _sync_hand() -> void:
 	for i in range(n):
 		var card: CardData = hand[i]
 		var cv2: CardView = _hand_views[i]
-		cv2.set_card(card, _rank_power_bonus(_view_seat, card.rank))
+		var base_r: int = card.base_rank if card.base_rank > 0 else card.rank
+		cv2.set_card(card, _rank_power_bonus(_view_seat, card.rank, base_r))
+		cv2.set_effect_badge(run.rank_effect_badge(_view_seat, base_r))
 		cv2.set_display_size(cs)
 		cv2.selected = _trade_picks.has(card) if picking else _selected.has(card)
 		var legal: bool = yours and game.rank_is_legal(_view_seat, card.rank)
@@ -1537,11 +1637,12 @@ func _snapshot_for(seat: int) -> Dictionary:
 	if phase == "shop" and run.shop_seat == seat:
 		shop = {
 			"gold": run.gold_of(seat),
+			"chips": run.chips_of(seat),
 			"offers": _priced_offers_for(seat),
 			"owned": run.owned_counts_of(seat),
 			"reroll": run.reroll_cost(),
-			"context": "%s  ·  Gold $%d  ·  HP %d/%d  ·  %d offers" % [
-				run.name_of(seat), run.gold_of(seat), int(run.hp[seat]), int(run.seat_max_hp[seat]), run.shop_offers.size()],
+			"context": "%s  ·  $%d  ·  ◈%d  ·  HP %d/%d  ·  %d offers" % [
+				run.name_of(seat), run.gold_of(seat), run.chips_of(seat), int(run.hp[seat]), int(run.seat_max_hp[seat]), run.shop_offers.size()],
 		}
 	var acts: Array = []
 	if phase == "results":
@@ -1599,7 +1700,7 @@ func _apply_lan_snapshot(data: Dictionary) -> void:
 		_trade_panel.visible = false
 	var shop: Dictionary = data.get("shop", {})
 	if shop is Dictionary and not shop.is_empty() and shop.has("offers"):
-		_shop.present(int(shop.get("gold", 0)), shop.get("offers", []), shop.get("owned", {}), int(shop.get("reroll", 2)), str(shop.get("context", "")))
+		_shop.present(int(shop.get("gold", 0)), shop.get("offers", []), shop.get("owned", {}), int(shop.get("reroll", 2)), str(shop.get("context", "")), int(shop.get("chips", 0)))
 		_client_shop_open = true
 	else:
 		_shop.visible = false
@@ -1682,11 +1783,13 @@ func _host_remote_play(seat: int, rank: int, count: int) -> void:
 	var combo: Dictionary = {"rank": rank, "count": count}
 	if not game.is_legal_combo(combo, seat):
 		return
+	var play_base: int = game.base_of_rank(seat, rank)
+	var was_lead: bool = game.lead
 	var origins: Array = _seat_origins(seat, count)
 	var r: Dictionary = game.play(seat, combo)
 	if not bool(r.get("ok", false)):
 		return
-	_award_rank_gold(seat, rank)
+	_fire_rank_play(seat, play_base, count, was_lead, bool(r.get("finished", false)))
 	_message("%s plays %s." % [run.name_of(seat), str(r.get("label", ""))])
 	_lan_wait.clear()
 	_busy = true
@@ -1721,7 +1824,7 @@ func _host_shop_buy(seat: int, buy: String, id: String) -> void:
 	item = run.priced_copy_of(seat, item)
 	var ok: bool = false
 	match buy:
-		"upgrade":
+		"upgrade", "rank_fx", "combo":
 			ok = run.buy_upgrade(id, int(item.get("price", 0)))
 		"action":
 			ok = run.buy_action(id, int(item.get("price", 0)))

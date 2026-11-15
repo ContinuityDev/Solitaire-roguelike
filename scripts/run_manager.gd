@@ -1,8 +1,10 @@
 class_name RunManager
 extends Node
 
-## President run: HP, gold, round stake, owned upgrades, action inventory.
-## Human vs AI is LobbyConfig (solo = seat 0 human, 1–5 AIs). Every seat has gold.
+## Endless President run: HP, gold, Survivor Chips, escalating stake/ranks,
+## owned upgrades, rank customizations. Human vs AI is LobbyConfig.
+## The run never "wins" — it continues until every human hits 0 HP.
+## Arc: chip/gold synergies snowball early–mid; ante/stake outpace late.
 
 signal changed
 
@@ -12,21 +14,31 @@ const NAMES: Array = ["You", "The Speaker", "The Whip", "The Veep", "The Justice
 ## index = place 1..6. Tight: 1st $2 … 6th $9. Mid-run you cannot buy the desk.
 const GOLD_BY_PLACE: Array = [0, 2, 3, 4, 5, 7, 9]
 const STREAK_UNIT: int = 3 # bonus gold = STREAK_UNIT * (streak - 1)
+const BEST_PATH: String = "user://president_best.cfg"
+## Dead AI seats return with this much HP (scaled up by stake) so the table
+## never collapses into a last-seat "win".
+const AI_REVIVE_BASE: int = 28
+## Survivor Chips granted to each living human per AI knockout.
+## Chips are scarce — this is the only source (no economy / play grants).
+const CHIP_PER_KO: int = 1
 
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var round_n: int = 1
 var seat_gold: Array = []
+var seat_chips: Array = [] ## Survivor Chips — second upgrade currency (humans)
 var seat_max_hp: Array = []
 var seat_upgrades: Array = []
 var seat_actions: Array = []
 var seat_enhancements: Array = []
 var seat_favorite: Array = []
-var seat_rank_mods: Array = [] # Array of Array of {rank, effect}
+var seat_rank_mods: Array = [] # Array of Array of {rank, effect} — legacy gold binds
+var seat_rank_effects: Array = [] # Array of Array of {rank, effect, level} — chip customizations
 var hp: Array = [] # 6 ints
 var whip_used: bool = false
-var last_payout: Array = [] # [{seat, place, gold, hp_delta, name, role}]
+var last_payout: Array = [] # [{seat, place, gold, hp_delta, name, role, chips}]
 var last_first: int = 0 # previous round's President; leads the next deal
 var last_finish: Array = [] # finish order; roles/trades read from living seats
+var last_knockouts: Array = [] # AI seats that hit 0 HP this payout
 var cancelled_tribute_seats: Array = [] # givers who JSN/pardon
 var skip_tributes: bool = false
 var trade_log: Array = []
@@ -51,6 +63,13 @@ var gold: int:
 	set(value):
 		_ensure_seat_arrays()
 		seat_gold[0] = value
+
+var chips: int:
+	get:
+		return chips_of(0)
+	set(value):
+		_ensure_seat_arrays()
+		seat_chips[0] = value
 
 var max_hp: int:
 	get:
@@ -97,6 +116,8 @@ func _ready() -> void:
 func _ensure_seat_arrays() -> void:
 	while seat_gold.size() < SEATS:
 		seat_gold.append(0)
+	while seat_chips.size() < SEATS:
+		seat_chips.append(0)
 	while seat_max_hp.size() < SEATS:
 		seat_max_hp.append(START_HP)
 	while seat_upgrades.size() < SEATS:
@@ -109,6 +130,8 @@ func _ensure_seat_arrays() -> void:
 		seat_favorite.append(0)
 	while seat_rank_mods.size() < SEATS:
 		seat_rank_mods.append([])
+	while seat_rank_effects.size() < SEATS:
+		seat_rank_effects.append([])
 	while last_roles.size() < SEATS:
 		last_roles.append("")
 
@@ -146,22 +169,26 @@ func start_new_run(config = null) -> void:
 		seat_names.append("")
 	round_n = 1
 	seat_gold = []
+	seat_chips = []
 	seat_max_hp = []
 	seat_upgrades = []
 	seat_actions = []
 	seat_enhancements = []
 	seat_favorite = []
 	seat_rank_mods = []
+	seat_rank_effects = []
 	hp = []
 	last_roles = []
 	for i in range(SEATS):
 		seat_gold.append(0)
+		seat_chips.append(0)
 		seat_max_hp.append(START_HP)
 		seat_upgrades.append([])
 		seat_actions.append([])
 		seat_enhancements.append([])
 		seat_favorite.append(0)
 		seat_rank_mods.append([])
+		seat_rank_effects.append([])
 		last_roles.append("")
 		if i < seat_count:
 			hp.append(START_HP)
@@ -172,6 +199,7 @@ func start_new_run(config = null) -> void:
 	last_payout.clear()
 	last_first = 0
 	last_finish.clear()
+	last_knockouts.clear()
 	cancelled_tribute_seats.clear()
 	skip_tributes = false
 	trade_log.clear()
@@ -210,16 +238,42 @@ func living_seats() -> Array:
 func is_alive(seat: int) -> bool:
 	return int(hp[seat]) > 0
 
+## Balatro-ish ante index (1-based). Bumps every 3 rounds.
+func ante() -> int:
+	return int((round_n - 1) / 3) + 1
+
+## HP stake for the round. Early is gentle; late ante + late-round tax outpaces snowballs.
+## Round 1 → 6, Round 4 → 13, Round 10 → 27, Round 20 → 55, …
 func stake() -> int:
-	return 4 + round_n
+	var late: int = int((round_n - 1) / 5) * 2
+	return 5 + round_n + (ante() - 1) * 3 + late
+
+## Follow-power added to every dealt card this round (physical rank inflation).
+## Round 1 → 0; accelerates so faces hit K/M while stake climbs faster than economy.
+## Round 2 → 1, Round 5 → 7, Round 10 → 24, Round 20 → 82, Round 40 → 299, …
+func rank_bonus() -> int:
+	var r: int = round_n - 1
+	if r <= 0:
+		return 0
+	return r + int((r * r) / 6)
 
 func gold_of(seat: int) -> int:
 	_ensure_seat_arrays()
 	return int(seat_gold[seat])
 
+func chips_of(seat: int) -> int:
+	_ensure_seat_arrays()
+	return int(seat_chips[seat])
+
 func add_gold(seat: int, n: int) -> void:
 	_ensure_seat_arrays()
 	seat_gold[seat] = int(seat_gold[seat]) + n
+
+func add_chips(seat: int, n: int) -> void:
+	if n == 0:
+		return
+	_ensure_seat_arrays()
+	seat_chips[seat] = maxi(0, int(seat_chips[seat]) + n)
 
 func favorite_of(seat: int) -> int:
 	_ensure_seat_arrays()
@@ -240,6 +294,10 @@ func enhancements_of(seat: int) -> Array:
 func rank_mods_of(seat: int) -> Array:
 	_ensure_seat_arrays()
 	return seat_rank_mods[seat]
+
+func rank_effects_of(seat: int) -> Array:
+	_ensure_seat_arrays()
+	return seat_rank_effects[seat]
 
 func count_upgrade_of(seat: int, id: String) -> int:
 	var n: int = 0
@@ -285,11 +343,13 @@ func count_enhancement(id: String) -> int:
 func has_enhancement(id: String) -> bool:
 	return has_enhancement_of(0, id)
 
-func shop_price_of(seat: int, base: int) -> int:
+func shop_price_of(seat: int, base: int, currency: String = "gold") -> int:
+	if currency == "chips":
+		return maxi(1, base - count_upgrade_of(seat, "bargain"))
 	return maxi(1, base - 2 * count_upgrade_of(seat, "lobbyist"))
 
-func shop_price(base: int) -> int:
-	return shop_price_of(0, base)
+func shop_price(base: int, currency: String = "gold") -> int:
+	return shop_price_of(0, base, currency)
 
 func owned_counts_of(seat: int) -> Dictionary:
 	var out: Dictionary = {}
@@ -310,6 +370,11 @@ func owned_counts_of(seat: int) -> Dictionary:
 			var od: Dictionary = owned
 			if int(od.get("rank", -1)) == int(info.get("rank", -2)) and str(od.get("effect", "")) == str(info.get("effect", "?")):
 				out[mid] = int(out.get(mid, 0)) + 1
+	for fx in RankEffectDB.EFFECTS:
+		var fid: String = str(fx["id"])
+		var lvl: int = rank_effect_level(seat, int(fx.get("rank", -1)), str(fx.get("effect", "")))
+		if lvl > 0:
+			out[fid] = lvl
 	return out
 
 func owned_counts() -> Dictionary:
@@ -327,7 +392,9 @@ func priced_copy(item: Dictionary) -> Dictionary:
 
 func priced_copy_of(seat: int, item: Dictionary) -> Dictionary:
 	var d: Dictionary = item.duplicate()
-	d["price"] = shop_price_of(seat, int(d.get("price", 0)))
+	var cur: String = UpgradeDB.currency_of(d)
+	d["currency"] = cur
+	d["price"] = shop_price_of(seat, int(d.get("price", 0)), cur)
 	return d
 
 func has_action_of(seat: int, id: String) -> bool:
@@ -356,12 +423,14 @@ func result_action_ids_of(seat: int) -> Array:
 func result_action_ids() -> Array:
 	return result_action_ids_of(0)
 
+## `rank` here is the deal-face / base_rank slot (classic 1–13), not the inflated face.
 func rank_power_bonus(seat: int, rank: int) -> int:
 	var n: int = 0
 	for m in rank_mods_of(seat):
 		var d: Dictionary = m
 		if int(d.get("rank", -1)) == rank and str(d.get("effect", "")) == "power":
 			n += 1
+	n += rank_effect_level(seat, rank, "power")
 	return n
 
 func rank_gold_on_play(seat: int, rank: int) -> int:
@@ -370,20 +439,62 @@ func rank_gold_on_play(seat: int, rank: int) -> int:
 		var d: Dictionary = m
 		if int(d.get("rank", -1)) == rank and str(d.get("effect", "")) == "gold_play":
 			n += 1
+	n += rank_effect_level(seat, rank, "gold")
+	var rush: int = count_upgrade_of(seat, "gold_rush")
+	if rush > 0 and n > 0:
+		n *= (1 + rush)
 	return n
+
+func rank_chips_on_play(seat: int, rank: int) -> int:
+	return rank_effect_level(seat, rank, "chips")
 
 func rank_always_legal(seat: int, rank: int) -> bool:
 	for m in rank_mods_of(seat):
 		var d: Dictionary = m
 		if int(d.get("rank", -1)) == rank and str(d.get("effect", "")) == "always_legal":
 			return true
-	return false
+	return rank_effect_level(seat, rank, "always_legal") > 0
+
+func rank_effect_level(seat: int, rank: int, effect: String) -> int:
+	for fx in rank_effects_of(seat):
+		var d: Dictionary = fx
+		if int(d.get("rank", -1)) == rank and str(d.get("effect", "")) == effect:
+			return int(d.get("level", 1))
+	return 0
+
+func rank_effects_for_base(seat: int, base_rank: int) -> Array:
+	var out: Array = []
+	for fx in rank_effects_of(seat):
+		var d: Dictionary = fx
+		if int(d.get("rank", -1)) == base_rank:
+			out.append(d.duplicate())
+	for m in rank_mods_of(seat):
+		var md: Dictionary = m
+		if int(md.get("rank", -1)) == base_rank:
+			out.append({"rank": base_rank, "effect": str(md.get("effect", "")), "level": 1, "legacy": true})
+	return out
+
+func rank_effect_badge(seat: int, base_rank: int) -> String:
+	var bits: PackedStringArray = PackedStringArray()
+	for fx in rank_effects_for_base(seat, base_rank):
+		var eff: String = str(fx.get("effect", ""))
+		if eff == "gold_play":
+			eff = "gold"
+		bits.append(RankEffectDB.effect_label(eff, int(fx.get("level", 1))))
+	return " ".join(bits)
 
 func rank_mod_short(seat: int) -> String:
 	var bits: PackedStringArray = PackedStringArray()
 	for m in rank_mods_of(seat):
 		var d: Dictionary = m
 		bits.append(" %s%s" % [RankSystem.short_label(int(d.get("rank", 0))), RankModDB.effect_short(str(d.get("effect", "")))])
+	for fx in rank_effects_of(seat):
+		var d2: Dictionary = fx
+		bits.append(" %s%s" % [
+			RankSystem.short_label(int(d2.get("rank", 0))),
+			RankEffectDB.effect_label(str(d2.get("effect", "")), int(d2.get("level", 1))),
+		])
+	bits.append(combo_short(seat))
 	return "".join(bits)
 
 func bind_rank_mod(seat: int, rank: int, effect: String) -> void:
@@ -391,9 +502,22 @@ func bind_rank_mod(seat: int, rank: int, effect: String) -> void:
 	(seat_rank_mods[seat] as Array).append(RankModDB.make(rank, effect))
 	changed.emit()
 
+func bind_or_level_rank_effect(seat: int, rank: int, effect: String) -> int:
+	_ensure_seat_arrays()
+	for fx in rank_effects_of(seat):
+		var d: Dictionary = fx
+		if int(d.get("rank", -1)) == rank and str(d.get("effect", "")) == effect:
+			d["level"] = int(d.get("level", 1)) + 1
+			changed.emit()
+			return int(d["level"])
+	(seat_rank_effects[seat] as Array).append(RankEffectDB.make(rank, effect, 1))
+	changed.emit()
+	return 1
+
 ## Place array is seats in finish order (1st ... last).
 func apply_payouts(finish_order: Array) -> void:
 	last_payout.clear()
+	last_knockouts.clear()
 	last_finish = []
 	for s0 in finish_order:
 		last_finish.append(int(s0))
@@ -409,7 +533,11 @@ func apply_payouts(finish_order: Array) -> void:
 	for si in range(SEATS):
 		if roles.has(si):
 			last_roles[si] = str(roles[si]["role"])
+	var alive_before: Dictionary = {}
+	for bi in range(SEATS):
+		alive_before[bi] = int(hp[bi]) > 0
 	var s: int = stake()
+	var gold_earned: Dictionary = {}
 	for i in range(n):
 		var seat: int = int(last_finish[i])
 		var place: int = i + 1
@@ -436,10 +564,15 @@ func apply_payouts(finish_order: Array) -> void:
 		var role: String = str(roles.get(seat, {}).get("role", RoleTrade.ROLE_NEUTRAL))
 		var streak: int = _tick_role_streak(seat, role)
 		var streak_bonus: int = streak_bonus_gold(streak)
+		# Ante stipend keeps the desk reachable as stakes climb.
+		var ante_gold: int = ante() - 1
+		gold_gain += ante_gold
+		gold_gain += 2 * count_upgrade_of(seat, "payroll")
 		if has_enhancement_of(seat, "gilded") and place <= 2:
 			gold_gain += 2 * count_enhancement_of(seat, "gilded")
 		gold_gain += streak_bonus
 		add_gold(seat, gold_gain)
+		gold_earned[seat] = gold_gain
 		var cap: int = int(seat_max_hp[seat])
 		hp[seat] = clampi(int(hp[seat]) + hp_delta, 0, cap)
 		if has_upgrade_of(seat, "safe_seat") and int(hp[seat]) > 0:
@@ -449,20 +582,200 @@ func apply_payouts(finish_order: Array) -> void:
 			"gold": gold_gain,
 			"hp_delta": hp_delta, "name": name_of(seat), "role": role,
 			"streak": streak, "streak_bonus": streak_bonus,
+			"chips": 0,
 		})
+	# Survivor Chips: each AI that just hit 0 HP pays chips to living humans.
+	for ko in range(SEATS):
+		if not is_ai(ko):
+			continue
+		if bool(alive_before.get(ko, false)) and int(hp[ko]) <= 0:
+			last_knockouts.append(ko)
+	_grant_survivor_chips(gold_earned)
 	_check_end()
 	changed.emit()
 
+func _grant_survivor_chips(_gold_earned: Dictionary = {}) -> void:
+	## Chips only from AI eliminations — flat CHIP_PER_KO each, no multipliers.
+	if last_knockouts.is_empty():
+		return
+	for human in living_humans():
+		var h: int = int(human)
+		var chip_gain: int = CHIP_PER_KO * last_knockouts.size()
+		if chip_gain <= 0:
+			continue
+		add_chips(h, chip_gain)
+		log_event("%s banks %d Survivor Chip(s) (AI down)." % [name_of(h), chip_gain])
+		for row in last_payout:
+			if int(row.get("seat", -1)) == h:
+				row["chips"] = int(row.get("chips", 0)) + chip_gain
+				break
+
+## Owned combo buffs for a seat (leveled by repurchase). One entry per id.
+func combo_buffs_of(seat: int) -> Array:
+	var out: Array = []
+	var seen: Dictionary = {}
+	for id in upgrades_of(seat):
+		var sid: String = str(id)
+		if not ComboBuffDB.is_combo(sid) or seen.has(sid):
+			continue
+		seen[sid] = true
+		var info: Dictionary = ComboBuffDB.get_by_id(sid)
+		if info.is_empty():
+			continue
+		var d: Dictionary = info.duplicate()
+		d["level"] = count_upgrade_of(seat, sid)
+		out.append(d)
+	return out
+
+## Multiply follow power when combo conditions match (e.g. Quad Fours ×4).
+## Matching mult buffs multiply together; each stack level adds +1 to that buff's amount.
+func combo_power_mult(seat: int, base_rank: int, count: int, is_lead: bool = false, last_card: bool = false) -> int:
+	var mult: int = 1
+	for buff in combo_buffs_of(seat):
+		if str(buff.get("effect", "")) != "mult_power":
+			continue
+		if not ComboBuffDB.matches(buff, base_rank, count, is_lead, last_card):
+			continue
+		var amt: int = int(buff.get("amount", 1))
+		var lvl: int = int(buff.get("level", 1))
+		mult *= maxi(1, amt + (lvl - 1))
+	return maxi(1, mult)
+
+func combo_retrigger_count(seat: int, base_rank: int, count: int, is_lead: bool, last_card: bool) -> int:
+	var n: int = 0
+	for buff in combo_buffs_of(seat):
+		if str(buff.get("effect", "")) != "retrigger":
+			continue
+		if not ComboBuffDB.matches(buff, base_rank, count, is_lead, last_card):
+			continue
+		n += int(buff.get("amount", 1)) * int(buff.get("level", 1))
+	return n
+
+func combo_short(seat: int) -> String:
+	var bits: PackedStringArray = PackedStringArray()
+	for buff in combo_buffs_of(seat):
+		bits.append(" " + ComboBuffDB.short_label(buff, int(buff.get("level", 1))))
+	return "".join(bits)
+
+## Fire rank customizations + combo buffs when a seat plays.
+## `base_rank` is the deal-face. Returns {gold, chips, damage, heal, logs, target, retriggers, mult}.
+func trigger_rank_play(seat: int, base_rank: int, hand: Array = [], count: int = 1, is_lead: bool = false, last_card: bool = false) -> Dictionary:
+	var out: Dictionary = {"gold": 0, "chips": 0, "damage": 0, "heal": 0, "logs": [], "target": -1, "retriggers": 0, "mult": 1}
+	if base_rank < 0:
+		return out
+	var times: int = 1 + combo_retrigger_count(seat, base_rank, count, is_lead, last_card)
+	out["retriggers"] = times - 1
+	for _t in range(times):
+		_apply_rank_bind_pulse(seat, base_rank, hand, out)
+	_apply_combo_payouts(seat, base_rank, count, is_lead, last_card, out)
+	for line in out["logs"]:
+		log_event(str(line))
+	if not (out["logs"] as Array).is_empty():
+		changed.emit()
+	return out
+
+func _apply_rank_bind_pulse(seat: int, base_rank: int, hand: Array, out: Dictionary) -> void:
+	if base_rank <= 0:
+		return
+	var gold_n: int = rank_gold_on_play(seat, base_rank)
+	if gold_n > 0:
+		add_gold(seat, gold_n)
+		out["gold"] = int(out["gold"]) + gold_n
+		(out["logs"] as Array).append("%s earns $%d on %s." % [name_of(seat), gold_n, RankSystem.short_label(base_rank)])
+	var dmg: int = rank_effect_level(seat, base_rank, "damage")
+	if dmg > 0:
+		var target: int = _weakest_living_ai(seat)
+		if target >= 0:
+			hp[target] = maxi(0, int(hp[target]) - dmg)
+			out["damage"] = int(out["damage"]) + dmg
+			out["target"] = target
+			(out["logs"] as Array).append("%s whips %s for %d HP." % [name_of(seat), name_of(target), dmg])
+			if int(hp[target]) <= 0 and is_ai(target):
+				# Mid-round elimination still grants the scarce KO chip (humans only).
+				if is_human(seat) and CHIP_PER_KO > 0:
+					add_chips(seat, CHIP_PER_KO)
+					out["chips"] = int(out["chips"]) + CHIP_PER_KO
+					(out["logs"] as Array).append("%s Survivor Chip +%d (AI eliminated)." % [name_of(seat), CHIP_PER_KO])
+	var heal_n: int = rank_effect_level(seat, base_rank, "heal")
+	if heal_n > 0 and is_alive(seat):
+		var before: int = int(hp[seat])
+		hp[seat] = mini(int(seat_max_hp[seat]), before + heal_n)
+		var gained: int = int(hp[seat]) - before
+		out["heal"] = int(out["heal"]) + gained
+		if gained > 0:
+			(out["logs"] as Array).append("%s heals %d HP." % [name_of(seat), gained])
+	var buff_n: int = rank_effect_level(seat, base_rank, "buff_hand")
+	if buff_n > 0 and not hand.is_empty():
+		var labs: PackedStringArray = CardForge.promote_lowest(hand, buff_n)
+		if not labs.is_empty():
+			(out["logs"] as Array).append("%s coaches: %s" % [name_of(seat), ", ".join(labs)])
+
+func _apply_combo_payouts(seat: int, base_rank: int, count: int, is_lead: bool, last_card: bool, out: Dictionary) -> void:
+	for buff in combo_buffs_of(seat):
+		var eff: String = str(buff.get("effect", ""))
+		if eff != "gold":
+			continue
+		if not ComboBuffDB.matches(buff, base_rank, count, is_lead, last_card):
+			continue
+		var amt: int = int(buff.get("amount", 1)) * int(buff.get("level", 1))
+		if amt <= 0:
+			continue
+		add_gold(seat, amt)
+		out["gold"] = int(out["gold"]) + amt
+		(out["logs"] as Array).append("%s combo %s: +$%d." % [name_of(seat), str(buff.get("name", "")), amt])
+
+func _weakest_living_ai(except_seat: int = -1) -> int:
+	var best: int = -1
+	var best_hp: int = 999999
+	for seat in living_seats():
+		var s: int = int(seat)
+		if s == except_seat or not is_ai(s):
+			continue
+		var h: int = int(hp[s])
+		if h < best_hp or (h == best_hp and s < best):
+			best_hp = h
+			best = s
+	return best
+
+## Endless: only a total human wipeout ends the run. Last seat standing is
+## not a win — dead AIs are revived before the next deal.
 func _check_end() -> void:
-	var live: Array = living_seats()
 	var live_h: Array = living_humans()
 	if live_h.is_empty():
 		run_over = true
 		run_won = false
+		record_best_round(round_n)
 		return
-	if live.size() == 1:
-		run_over = true
-		run_won = is_human(int(live[0]))
+	run_over = false
+	run_won = false
+
+## Bring every dead AI seat back so the cabinet always fills the table.
+## Revive tanky early so AI deaths (and chips) stay rare and valuable.
+func revive_cabinet() -> void:
+	_ensure_seat_arrays()
+	var revive_hp: int = mini(START_HP, maxi(AI_REVIVE_BASE + 8, stake() + 12 + ante() * 4))
+	for seat in range(seat_count):
+		if is_human(seat):
+			continue
+		if int(hp[seat]) <= 0:
+			hp[seat] = revive_hp
+	changed.emit()
+
+static func load_best_round() -> int:
+	var cf: ConfigFile = ConfigFile.new()
+	if cf.load(BEST_PATH) != OK:
+		return 0
+	return int(cf.get_value("stats", "best_round", 0))
+
+static func record_best_round(reached: int) -> void:
+	if reached <= 0:
+		return
+	var cf: ConfigFile = ConfigFile.new()
+	cf.load(BEST_PATH)
+	var prev: int = int(cf.get_value("stats", "best_round", 0))
+	if reached > prev:
+		cf.set_value("stats", "best_round", reached)
+		cf.save(BEST_PATH)
 
 func buy_upgrade(id: String, price: int) -> bool:
 	return buy_upgrade_for(shop_seat, id, price)
@@ -478,19 +791,52 @@ func _seat_may_buy(seat: int) -> bool:
 		return true
 	return shop_phase
 
+func _pay(seat: int, price: int, currency: String) -> bool:
+	if currency == "chips":
+		if chips_of(seat) < price:
+			return false
+		seat_chips[seat] = chips_of(seat) - price
+		return true
+	if gold_of(seat) < price:
+		return false
+	seat_gold[seat] = gold_of(seat) - price
+	return true
+
+func _refund(seat: int, price: int, currency: String) -> void:
+	if currency == "chips":
+		seat_chips[seat] = chips_of(seat) + price
+	else:
+		seat_gold[seat] = gold_of(seat) + price
+
 func buy_upgrade_for(seat: int, id: String, price: int) -> bool:
 	_ensure_seat_arrays()
 	if not _seat_may_buy(seat):
 		return false
-	if gold_of(seat) < price:
+	var info: Dictionary = UpgradeDB.get_by_id(id)
+	var currency: String = UpgradeDB.currency_of(info) if not info.is_empty() else "gold"
+	if RankEffectDB.is_rank_fx(id):
+		currency = "chips"
+	if not _pay(seat, price, currency):
 		return false
-	seat_gold[seat] = gold_of(seat) - price
-	if RankModDB.is_mod(id):
-		var info: Dictionary = RankModDB.get_by_id(id)
-		if info.is_empty():
-			seat_gold[seat] = gold_of(seat) + price
+	if RankEffectDB.is_rank_fx(id):
+		var fx: Dictionary = RankEffectDB.get_by_id(id)
+		if fx.is_empty():
+			_refund(seat, price, currency)
 			return false
-		bind_rank_mod(seat, int(info.get("rank", 0)), str(info.get("effect", "")))
+		bind_or_level_rank_effect(seat, int(fx.get("rank", 0)), str(fx.get("effect", "")))
+		changed.emit()
+		return true
+	if RankModDB.is_mod(id):
+		var mod: Dictionary = RankModDB.get_by_id(id)
+		if mod.is_empty():
+			_refund(seat, price, currency)
+			return false
+		bind_rank_mod(seat, int(mod.get("rank", 0)), str(mod.get("effect", "")))
+		changed.emit()
+		return true
+	if ComboBuffDB.is_combo(id):
+		# Stored as a normal upgrade id; level = count of copies.
+		upgrades_of(seat).append(id)
 		changed.emit()
 		return true
 	if id.begins_with("favorite_"):
@@ -508,9 +854,8 @@ func buy_action_for(seat: int, id: String, price: int) -> bool:
 	_ensure_seat_arrays()
 	if not _seat_may_buy(seat):
 		return false
-	if gold_of(seat) < price:
+	if not _pay(seat, price, "gold"):
 		return false
-	seat_gold[seat] = gold_of(seat) - price
 	actions_of(seat).append(id)
 	changed.emit()
 	return true
@@ -519,9 +864,8 @@ func buy_enhancement_for(seat: int, id: String, price: int) -> bool:
 	_ensure_seat_arrays()
 	if not _seat_may_buy(seat):
 		return false
-	if gold_of(seat) < price:
+	if not _pay(seat, price, "gold"):
 		return false
-	seat_gold[seat] = gold_of(seat) - price
 	enhancements_of(seat).append(id)
 	changed.emit()
 	return true
@@ -560,14 +904,41 @@ func next_round() -> void:
 	round_n += 1
 	whip_used = false
 	close_shop_phase()
+	revive_cabinet()
+	_grant_war_bonds()
 	changed.emit()
+
+func _grant_war_bonds() -> void:
+	for seat in range(seat_count):
+		if not is_alive(seat):
+			continue
+		var n: int = count_upgrade_of(seat, "war_bonds")
+		if n > 0:
+			var gold_n: int = 3 * n
+			add_gold(seat, gold_n)
+			log_event("%s War Bonds: +$%d." % [name_of(seat), gold_n])
 
 func open_shop_phase() -> Array:
 	shop_phase = true
+	_apply_interest_all()
 	return ai_shop_all()
 
 func close_shop_phase() -> void:
 	shop_phase = false
+
+func _apply_interest_all() -> void:
+	for seat in range(seat_count):
+		if not is_alive(seat):
+			continue
+		var stacks: int = count_upgrade_of(seat, "interest")
+		if stacks <= 0:
+			continue
+		# 10% + 5% per extra stack of current gold.
+		var pct: int = 10 + 5 * (stacks - 1)
+		var gain: int = int(gold_of(seat) * pct / 100)
+		if gain > 0:
+			add_gold(seat, gain)
+			log_event("%s Compound Interest: +$%d." % [name_of(seat), gain])
 
 func reset_tribute_flags() -> void:
 	cancelled_tribute_seats.clear()
@@ -609,7 +980,7 @@ func begin_shop_visit_for(seat: int) -> void:
 	changed.emit()
 
 func reroll_cost() -> int:
-	return shop_price_of(shop_seat, ShopStock.reroll_cost_at(shop_rerolls))
+	return shop_price_of(shop_seat, ShopStock.reroll_cost_at(shop_rerolls), "gold")
 
 func reroll_shop() -> bool:
 	var c: int = reroll_cost()
@@ -687,7 +1058,13 @@ func ai_shop_all() -> Array:
 		var offers: Array = ShopStock.draw_offers(rng, self, ShopStock.AI_SLOTS, seat)
 		var priced: Array = []
 		for o in offers:
+			# AIs only spend gold — skip chip-priced customizations / combos / economy.
+			var oid: String = str(o.get("id", ""))
+			if UpgradeDB.currency_of(o) == "chips" or RankEffectDB.is_rank_fx(oid) or ComboBuffDB.is_combo(oid):
+				continue
 			priced.append(priced_copy_of(seat, o))
+		if priced.is_empty():
+			continue
 		var role: String = RoleTrade.role_of(last_finish, seat)
 		var pick: Dictionary = PresidentAI.choose_shop(priced, gold_of(seat), seat % 3, role)
 		if pick.is_empty():
@@ -710,6 +1087,11 @@ func ai_shop_all() -> Array:
 
 func apply_deal_effects(game: PresidentGame) -> Array:
 	var logs: Array = []
+	var bonus: int = rank_bonus()
+	if bonus > 0:
+		Deck.inflate_hands(game.hands, bonus)
+		Deck.inflate_card_list(game.kitty, bonus)
+		logs.append("Rank inflation +%s (ante %d)." % [NumFormat.compact(bonus), ante()])
 	for seat in game.living:
 		var s: int = int(seat)
 		Deck._apply_packed(game.hands, s, packed_level_of(s), rng)
@@ -718,9 +1100,9 @@ func apply_deal_effects(game: PresidentGame) -> Array:
 			Deck._apply_favorite(game.hands, s, fav, rng)
 		var promo: int = promote_level_of(s)
 		if promo > 0 and game.hands.has(s):
-			var changed: PackedStringArray = CardForge.promote_lowest(game.hands[s], promo)
-			if not changed.is_empty():
-				logs.append("%s incumbent: %s" % [name_of(s), ", ".join(changed)])
+			var changed_labs: PackedStringArray = CardForge.promote_lowest(game.hands[s], promo)
+			if not changed_labs.is_empty():
+				logs.append("%s incumbent: %s" % [name_of(s), ", ".join(changed_labs)])
 		var lucky_n: int = count_enhancement_of(s, "lucky")
 		for _i in range(lucky_n):
 			if not game.hands.has(s):
@@ -741,6 +1123,7 @@ func pack_public() -> Dictionary:
 		"seat_count": seat_count,
 		"hp": hp.duplicate(),
 		"seat_gold": seat_gold.duplicate(),
+		"seat_chips": seat_chips.duplicate(),
 		"seat_max_hp": seat_max_hp.duplicate(),
 		"seat_names": seat_names.duplicate(),
 		"human_seats": human_seats.duplicate(),
@@ -749,10 +1132,12 @@ func pack_public() -> Dictionary:
 		"seat_enhancements": _dup_arrays(seat_enhancements),
 		"seat_favorite": seat_favorite.duplicate(),
 		"seat_rank_mods": _dup_mods(seat_rank_mods),
+		"seat_rank_effects": _dup_mods(seat_rank_effects),
 		"whip_used": whip_used,
 		"last_payout": last_payout.duplicate(true),
 		"last_first": last_first,
 		"last_finish": last_finish.duplicate(),
+		"last_knockouts": last_knockouts.duplicate(),
 		"cancelled_tribute_seats": cancelled_tribute_seats.duplicate(),
 		"skip_tributes": skip_tributes,
 		"trade_log": trade_log.duplicate(),
@@ -774,6 +1159,7 @@ func apply_public(d: Dictionary) -> void:
 	seat_count = int(d.get("seat_count", 6))
 	hp = _ints_of(d.get("hp", hp))
 	seat_gold = _ints_of(d.get("seat_gold", seat_gold))
+	seat_chips = _ints_of(d.get("seat_chips", seat_chips))
 	seat_max_hp = _ints_of(d.get("seat_max_hp", seat_max_hp))
 	seat_names = _strs_of(d.get("seat_names", seat_names))
 	human_seats = _ints_of(d.get("human_seats", human_seats))
@@ -782,6 +1168,7 @@ func apply_public(d: Dictionary) -> void:
 	seat_enhancements = _dup_arrays(d.get("seat_enhancements", seat_enhancements))
 	seat_favorite = _ints_of(d.get("seat_favorite", seat_favorite))
 	seat_rank_mods = _dup_mods(d.get("seat_rank_mods", seat_rank_mods))
+	seat_rank_effects = _dup_mods(d.get("seat_rank_effects", seat_rank_effects))
 	whip_used = bool(d.get("whip_used", false))
 	last_payout = []
 	for p in d.get("last_payout", []):
@@ -789,6 +1176,7 @@ func apply_public(d: Dictionary) -> void:
 			last_payout.append((p as Dictionary).duplicate())
 	last_first = int(d.get("last_first", 0))
 	last_finish = _ints_of(d.get("last_finish", []))
+	last_knockouts = _ints_of(d.get("last_knockouts", []))
 	cancelled_tribute_seats = _ints_of(d.get("cancelled_tribute_seats", []))
 	skip_tributes = bool(d.get("skip_tributes", false))
 	trade_log = _strs_of(d.get("trade_log", []))

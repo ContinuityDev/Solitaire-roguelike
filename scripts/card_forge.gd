@@ -2,12 +2,22 @@ class_name CardForge
 extends RefCounted
 
 ## In-place card transforms. Never grants extra shop items or extra cards.
+## Promotion climbs the classic ladder (3…K → A → 2) then into uncapped
+## super ranks (16, 17, …) so Incumbent / Rally can push numbers forever.
 
 static func next_rank(rank: int) -> int:
-	if RankSystem.is_joker(rank) or rank == 2 or rank == 1:
+	if RankSystem.is_joker(rank):
 		return rank
+	if RankSystem.is_super(rank):
+		return rank + 1
+	if rank == 2:
+		return RankSystem.SUPER_MIN
+	if rank == 1:
+		return 2
 	if rank == 13:
 		return 1
+	if rank >= 3 and rank <= 12:
+		return rank + 1
 	return rank + 1
 
 static func promote_card(card: CardData) -> bool:
@@ -21,7 +31,7 @@ static func promote_card(card: CardData) -> bool:
 
 static func lowest_index(hand: Array, skip_bombs: bool = true) -> int:
 	var best_i: int = -1
-	var best_p: int = 99
+	var best_p: int = 1_000_000_000
 	for i in range(hand.size()):
 		var c: CardData = hand[i]
 		if RankSystem.is_joker(c.rank):
@@ -40,18 +50,19 @@ static func lowest_index(hand: Array, skip_bombs: bool = true) -> int:
 				best_i = i2
 	return best_i
 
-## Promote the n lowest (non-bomb) cards one rank. Returns labels like "3→4".
+## Promote the n lowest cards one rank (jokers skipped). Super ranks allowed.
+## Returns labels like "3→4" or "2→16".
 static func promote_lowest(hand: Array, n: int) -> PackedStringArray:
 	var out: PackedStringArray = PackedStringArray()
 	var used: Dictionary = {}
 	for _k in range(n):
 		var best_i: int = -1
-		var best_p: int = 99
+		var best_p: int = 1_000_000_000
 		for i in range(hand.size()):
 			if used.has(i):
 				continue
 			var c: CardData = hand[i]
-			if RankSystem.is_joker(c.rank) or c.rank == 2 or c.rank == 1:
+			if RankSystem.is_joker(c.rank):
 				continue
 			var p: int = RankSystem.president_power(c.rank)
 			if p < best_p:

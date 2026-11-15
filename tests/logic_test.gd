@@ -327,9 +327,9 @@ func _init() -> void:
 	var promo_d: Dictionary = RankSystem.buff_display(c3, 0)
 	_check(bool(promo_d["buffed"]) and str(promo_d["shown"]) == "4" and str(promo_d["printed"]) == "3", "Incumbent/Rally keeps a printed 3 and a blue 4")
 	var ace: CardData = CardData.new(1, 0, true)
-	_check(not CardForge.promote_card(ace) and ace.rank == 1, "Ace does not promote")
+	_check(CardForge.promote_card(ace) and ace.rank == 2, "Ace promotes to bomb (uncapped climb)")
 	var bomb: CardData = CardData.new(2, 0, true)
-	_check(not CardForge.promote_card(bomb) and bomb.rank == 2, "2s do not promote")
+	_check(CardForge.promote_card(bomb) and bomb.rank == 16, "2s promote into super ranks")
 	var forge_hand: Array = [CardData.new(4, 1, true), CardData.new(9, 0, true)]
 	var n_forge: int = forge_hand.size()
 	var flab: String = CardForge.forge_bomb(forge_hand)
@@ -420,7 +420,7 @@ func _init() -> void:
 	_check(gblue.is_legal_combo(ai_blue["combo"], 1), "AI follow of a blue trick is legal")
 	rmod.free()
 
-	# Joker: always legal, dumps the rest of the hand, that seat is out, round ends.
+	# Joker: always legal; clears the pile and returns the lead — does NOT end the round.
 	var gj: PresidentGame = PresidentGame.new()
 	gj.living = [0, 1, 2]
 	gj.hands = {
@@ -429,25 +429,37 @@ func _init() -> void:
 		2: [CardData.new(3, 0, true)],
 	}
 	gj.current_player = 0
-	gj.lead = true
+	gj.lead = false
+	gj.trick_rank = 10
+	gj.trick_count = 1
+	gj.trick_power = 10
+	gj.trick_printed = 10
 	_check(gj.is_legal_combo({"rank": RankSystem.JOKER, "count": 1}, 0), "a single joker is always legal")
 	var pj: Dictionary = gj.play(0, {"rank": RankSystem.JOKER, "count": 1})
 	_check(bool(pj.get("joker", false)) and bool(pj.get("ok", false)), "joker play is flagged")
-	_check(gj.round_over, "joker ends the round")
-	_check(gj.finished.size() == 3 and int(gj.finished[0]) == 0, "joker player finishes first")
-	_check(int(gj.finished[1]) == 2, "fewest remaining cards place next")
-	_check(gj.hand_of(0).is_empty(), "joker dumps the rest of that hand")
+	_check(bool(pj.get("clear", false)), "joker clears the pile")
+	_check(not gj.round_over, "joker does not end the round")
+	_check(gj.finished.is_empty(), "joker does not finish the seat when cards remain")
+	_check(gj.hand_of(0).size() == 1, "joker only removes itself; rest of hand stays")
+	_check(gj.lead and gj.trick_count == 0 and gj.trick_power == 0, "pile cleared; seat has the lead")
+	_check(gj.current_player == 0, "joker player keeps the lead")
+	# Follow-joker as last card: seat finishes, but round continues if others remain.
 	gj.lead = false
 	gj.round_over = false
 	gj.finished.clear()
 	gj.hands[1] = [CardData.new(RankSystem.JOKER, 1, true)]
+	gj.hands[0] = [CardData.new(4, 0, true)]
+	gj.hands[2] = [CardData.new(3, 0, true)]
 	gj.trick_rank = 10
 	gj.trick_count = 2
 	gj.trick_power = 10
 	gj.current_player = 1
 	_check(gj.is_legal_combo({"rank": RankSystem.JOKER, "count": 1}, 1), "joker can follow any trick")
 	var pj2: Dictionary = gj.play(1, {"rank": RankSystem.JOKER, "count": 1})
-	_check(bool(pj2.get("joker", false)) and gj.round_over, "follow-joker still ends the round")
+	_check(bool(pj2.get("joker", false)) and bool(pj2.get("finished", false)), "last-card joker finishes that seat")
+	_check(not gj.round_over, "follow-joker does not end the round while others remain")
+	_check(gj.finished.size() == 1 and int(gj.finished[0]) == 1, "only the joker seat finished")
+	_check(gj.lead and gj.trick_count == 0, "follow-joker still clears the pile")
 
 	var phone_h: Dictionary = HandLayout.plan(13, 360.0, Vector2(70, 98))
 	_check(bool(phone_h["fits"]), "13 cards stay on a phone-width row")
@@ -595,14 +607,18 @@ func _init() -> void:
 	hot_run._check_end()
 	_check(hot_run.run_over and not hot_run.run_won, "all humans dead is a loss")
 	hot_run.free()
-	var win_run: RunManager = RunManager.new()
-	win_run.start_new_run(loc)
-	win_run.hp[0] = 0
-	win_run.hp[2] = 0
-	win_run.hp[3] = 0
-	win_run._check_end()
-	_check(win_run.run_over and win_run.run_won, "last living human wins")
-	win_run.free()
+	var endless_run: RunManager = RunManager.new()
+	endless_run.start_new_run(loc)
+	endless_run.hp[0] = 0
+	endless_run.hp[2] = 0
+	endless_run.hp[3] = 0
+	endless_run._check_end()
+	_check(not endless_run.run_over, "last living human does not end an endless run")
+	_check(not endless_run.run_won, "endless runs never set run_won")
+	endless_run.revive_cabinet()
+	_check(int(endless_run.hp[2]) > 0 and int(endless_run.hp[3]) > 0, "revive_cabinet restores dead AIs")
+	_check(int(endless_run.hp[0]) == 0, "revive_cabinet does not revive humans")
+	endless_run.free()
 
 	# LAN table: host is seat 0, joiners take empty AI seats, names stick.
 	var lan: LobbyConfig = LobbyConfig.new()
@@ -691,6 +707,294 @@ func _init() -> void:
 	tv.queue_free()
 	pin_host.queue_free()
 
+	# --- Endless scaling, lose condition, compact ranks ---
+	_check(NumFormat.compact(42) == "42", "compact under 1K stays plain")
+	_check(NumFormat.compact(1200) == "1.2K", "compact thousands")
+	_check(NumFormat.compact(3_400_000) == "3.4M", "compact millions")
+	_check(NumFormat.compact(2_000_000_000) == "2B", "compact billions trim .0")
+	_check(NumFormat.compact(0) == "0", "compact zero")
+
+	_check(RankSystem.inflate_rank(3, 0) == 3, "inflate bonus 0 is identity")
+	_check(RankSystem.inflate_rank(3, 10) == 13, "inflate 3+10 → King")
+	_check(RankSystem.inflate_rank(13, 1) == 1, "inflate King+1 → Ace")
+	_check(RankSystem.inflate_rank(1, 1) == 2, "inflate Ace+1 → bomb")
+	_check(RankSystem.inflate_rank(2, 1) == 16, "inflate bomb+1 → first super rank")
+	_check(RankSystem.president_power(25) == 25, "super rank power equals face")
+	_check(RankSystem.short_label(25) == "25", "super rank label is numeric")
+	_check(RankSystem.short_label(1500) == "1.5K", "huge rank uses compact label")
+	var super_card: CardData = CardData.new(16, 0, true)
+	var super_d: Dictionary = RankSystem.buff_display(super_card, 0)
+	_check(str(super_d["shown"]) == "16" and not bool(super_d["buffed"]), "super face 16 reads as 16, not 2+")
+
+	_check(CardForge.next_rank(13) == 1, "King promotes to Ace")
+	_check(CardForge.next_rank(1) == 2, "Ace promotes to bomb")
+	_check(CardForge.next_rank(2) == 16, "bomb promotes into super ranks")
+	_check(CardForge.next_rank(16) == 17, "super ranks climb without cap")
+	var climb: CardData = CardData.new(2, 1, true)
+	CardForge.promote_card(climb)
+	_check(climb.rank == 16, "promote_card climbs bomb to 16")
+
+	var scale_run: RunManager = RunManager.new()
+	scale_run.start_new_run()
+	_check(scale_run.ante() == 1 and scale_run.rank_bonus() == 0, "round 1 ante 1, no rank bonus")
+	_check(scale_run.stake() == 6, "round 1 stake is 5+1")
+	scale_run.round_n = 4
+	_check(scale_run.ante() == 2, "round 4 is ante 2")
+	_check(scale_run.rank_bonus() == 3 + int(9 / 6), "round 4 rank bonus formula")
+	_check(scale_run.stake() == 5 + 4 + 3, "round 4 stake adds ante pressure")
+	scale_run.round_n = 10
+	_check(scale_run.rank_bonus() == 9 + int(81 / 6), "round 10 rank bonus accelerates")
+	_check(scale_run.rank_bonus() >= 20, "mid-run bonus is meaningful")
+	_check(scale_run.stake() == 5 + 10 + 9 + 2, "round 10 stake adds late tax")
+	scale_run.round_n = 40
+	_check(scale_run.rank_bonus() >= 200, "late-run bonus is huge")
+
+	rng.seed = 99
+	var g_inf: PresidentGame = PresidentGame.new()
+	g_inf.setup([0, 1, 2, 3, 4, 5], rng)
+	Deck.inflate_hands(g_inf.hands, 12)
+	var saw_super: bool = false
+	var min_p: int = 999999
+	for s_inf in g_inf.living:
+		for c_inf in g_inf.hand_of(int(s_inf)):
+			var rr: int = (c_inf as CardData).rank
+			if RankSystem.is_joker(rr):
+				continue
+			var pp: int = RankSystem.president_power(rr)
+			if pp < min_p:
+				min_p = pp
+			if RankSystem.is_super(rr):
+				saw_super = true
+	_check(saw_super, "deal inflation produces super ranks")
+	_check(min_p >= 3 + 12, "inflation lifts the floor by the bonus")
+	g_inf.lead = true
+	g_inf.current_player = 0
+	var any_rank: int = 0
+	for c0 in g_inf.hand_of(0):
+		if not RankSystem.is_joker((c0 as CardData).rank):
+			any_rank = (c0 as CardData).rank
+			break
+	_check(g_inf.is_legal_combo({"rank": any_rank, "count": 1}, 0), "super/inflated ranks are legal on lead")
+
+	var lose_run: RunManager = RunManager.new()
+	lose_run.start_new_run()
+	lose_run.round_n = 7
+	lose_run.hp[0] = 0
+	lose_run._check_end()
+	_check(lose_run.run_over and not lose_run.run_won, "human at 0 HP ends the endless run as a loss")
+	RunManager.record_best_round(7)
+	_check(RunManager.load_best_round() >= 7, "best round persists to user://")
+	RunManager.record_best_round(3)
+	_check(RunManager.load_best_round() >= 7, "lower round does not overwrite best")
+	lose_run.free()
+
+	var next_r: RunManager = RunManager.new()
+	next_r.start_new_run()
+	next_r.hp[2] = 0
+	next_r.hp[4] = 0
+	next_r.next_round()
+	_check(next_r.round_n == 2, "next_round increments")
+	_check(int(next_r.hp[2]) > 0 and int(next_r.hp[4]) > 0, "next_round revives dead AIs")
+	next_r.free()
+
+	# --- Survivor Chips only from AI death; rank customizations ---
+	var chip_run: RunManager = RunManager.new()
+	chip_run.start_new_run()
+	_check(chip_run.chips == 0, "new run starts with 0 chips")
+	chip_run.hp[2] = 1
+	chip_run.hp[3] = 1
+	chip_run.apply_payouts([0, 1, 4, 5, 2, 3])
+	_check(chip_run.last_knockouts.has(2) or int(chip_run.hp[2]) == 0, "AI seat can be knocked out by payout")
+	var ko_n: int = chip_run.last_knockouts.size()
+	_check(ko_n >= 1, "at least one AI knockout recorded (%d)" % ko_n)
+	_check(chip_run.chips == ko_n * RunManager.CHIP_PER_KO, "survivor chips only from AI KO (%d chips for %d KOs)" % [chip_run.chips, ko_n])
+	# No other chip sources: economy upgrades / gold earned / empty KO list.
+	chip_run.chips = 0
+	chip_run.last_knockouts.clear()
+	chip_run.owned_upgrades.append("payroll")
+	chip_run.owned_upgrades.append("gold_rush")
+	chip_run.owned_upgrades.append("war_bonds")
+	chip_run._grant_survivor_chips({0: 100})
+	_check(chip_run.chips == 0, "no chips without AI knockouts")
+	chip_run.bind_or_level_rank_effect(0, 5, "gold")
+	var no_chip_play: Dictionary = chip_run.trigger_rank_play(0, 5, [], 1, false, false)
+	_check(int(no_chip_play.get("chips", 0)) == 0, "rank play never grants chips")
+	_check(int(no_chip_play.get("gold", 0)) >= 1, "rank play still pays gold")
+
+	chip_run.chips = 20
+	chip_run.gold = 0
+	_check(chip_run.buy_upgrade("fx_gold_5", 5), "can buy Mint Fives with chips")
+	_check(chip_run.chips == 15, "chip price deducted")
+	_check(chip_run.rank_effect_level(0, 5, "gold") >= 1, "rank effect leveled")
+	_check(chip_run.buy_upgrade("fx_gold_5", 5), "can level Mint Fives again")
+	_check(chip_run.rank_effect_level(0, 5, "gold") >= 2, "rank effect leveled further")
+	chip_run.owned_upgrades.append("gold_rush")
+	_check(chip_run.rank_gold_on_play(0, 5) >= 2, "gold-on-play matches level / rush")
+
+	var fx_res: Dictionary = chip_run.trigger_rank_play(0, 5, [])
+	_check(int(fx_res.get("gold", 0)) >= 2, "trigger_rank_play pays gold")
+	_check(int(fx_res.get("chips", 0)) == 0, "trigger_rank_play pays no chips")
+	chip_run.bind_or_level_rank_effect(0, 4, "damage")
+	chip_run.bind_or_level_rank_effect(0, 4, "damage")
+	chip_run.hp[1] = 20
+	var hp_before_whip: int = int(chip_run.hp[1])
+	chip_run.chips = 0
+	var fx3: Dictionary = chip_run.trigger_rank_play(0, 4, [])
+	_check(int(fx3.get("damage", 0)) == 2, "damage effect deals level HP")
+	_check(int(chip_run.hp[1]) == hp_before_whip - 2, "weakest AI lost HP")
+	_check(int(fx3.get("chips", 0)) == 0, "non-lethal whip deals no chips")
+	# Mid-round AI elimination still grants exactly CHIP_PER_KO.
+	chip_run.hp[1] = 1
+	chip_run.chips = 0
+	var fx_ko: Dictionary = chip_run.trigger_rank_play(0, 4, [])
+	_check(int(chip_run.hp[1]) == 0, "whip can eliminate AI")
+	_check(int(fx_ko.get("chips", 0)) == RunManager.CHIP_PER_KO, "mid-round KO grants only base chip")
+	_check(chip_run.rank_effect_badge(0, 5).contains("$"), "badge text for customized rank")
+
+	# Wide rank-targeted pool
+	_check(RankEffectDB.EFFECTS.size() >= 40, "rank fx pool covers many ranks (%d)" % RankEffectDB.EFFECTS.size())
+	_check(ComboBuffDB.COMBOS.size() >= 40, "combo pool is wide (%d)" % ComboBuffDB.COMBOS.size())
+	var ranks_covered: Dictionary = {}
+	for fx_item in RankEffectDB.EFFECTS:
+		ranks_covered[int(fx_item.get("rank", 0))] = true
+	for r in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]:
+		_check(ranks_covered.has(r), "rank fx covers %s" % RankSystem.short_label(r))
+	_check(not RankEffectDB.get_by_id("fx_gold_7").is_empty(), "Mint Sevens exists")
+	_check(not ComboBuffDB.get_by_id("combo_pair_7_gold").is_empty(), "Paired Sevens combo exists")
+	_check(not ComboBuffDB.get_by_id("combo_retrigger_9").is_empty(), "Nine Echo exists")
+	_check(str(UpgradeDB.get_by_id("chip_magnet").get("id", "")) == "", "Chip Magnet removed")
+	_check(str(UpgradeDB.get_by_id("syndicate").get("id", "")) == "", "Syndicate removed")
+	_check(str(UpgradeDB.get_by_id("war_chest").get("id", "")) == "", "War Chest removed")
+	_check(str(UpgradeDB.get_by_id("echo").get("id", "")) == "", "Echo Chamber removed")
+
+	# Economy: payroll, interest, bargain, war bonds (gold only)
+	var econ: RunManager = RunManager.new()
+	econ.start_new_run()
+	econ.owned_upgrades.append("payroll")
+	econ.owned_upgrades.append("payroll")
+	econ.apply_payouts([0, 1, 2, 3, 4, 5])
+	var pay_row: Dictionary = econ.last_payout[0]
+	_check(int(pay_row["gold"]) >= 2 + 4, "payroll adds +2 gold per stack on payout")
+	econ.gold = 100
+	econ.owned_upgrades.append("interest")
+	econ.open_shop_phase()
+	_check(econ.gold == 110, "compound interest grants 10% on desk open")
+	econ.owned_upgrades.append("bargain")
+	econ.owned_upgrades.append("bargain")
+	_check(econ.shop_price_of(0, 5, "chips") == 3, "bargain discounts chip prices")
+	econ.chips = 0
+	econ.gold = 0
+	econ.owned_upgrades.append("war_bonds")
+	econ.owned_upgrades.append("war_bonds")
+	econ.next_round()
+	_check(econ.gold == 6, "war bonds pays gold each new round")
+	_check(econ.chips == 0, "war bonds grants no chips")
+	econ.bind_or_level_rank_effect(0, 3, "gold")
+	econ.chips = 0
+	var gold_only: Dictionary = econ.trigger_rank_play(0, 3, [])
+	_check(int(gold_only.get("chips", 0)) == 0, "gold customizations never grant chips")
+
+	# Inflation preserves base_rank; blue true-value display uses deal-face + effective
+	var c_base: CardData = CardData.new(5, 0, true)
+	Deck.inflate_card(c_base, 12)
+	_check(c_base.base_rank == 5, "inflation keeps base_rank 5")
+	_check(c_base.rank != 5, "inflation changes face rank")
+	var packed_fx: Array = c_base.pack()
+	var unpacked_fx: CardData = CardData.unpack(packed_fx)
+	_check(unpacked_fx.base_rank == 5 and unpacked_fx.rank == c_base.rank, "base_rank survives pack")
+	var disp_inf: Dictionary = RankSystem.buff_display(c_base, 0)
+	_check(str(disp_inf.get("printed", "")) == "5", "inflated card prints deal-face 5")
+	_check(bool(disp_inf.get("buffed", false)), "inflated card shows blue true value")
+	_check(str(disp_inf.get("shown", "")) != "5", "true value differs from printed 5")
+	var c_strong: CardData = CardData.new(5, 1, true)
+	var disp_str: Dictionary = RankSystem.buff_display(c_strong, 1)
+	_check(str(disp_str.get("printed", "")) == "5" and str(disp_str.get("shown", "")) == "6", "Strong Fives show 5→6 in blue")
+	_check(bool(disp_str.get("buffed", false)), "power bind marks buffed for blue badge")
+	var c_plain: CardData = CardData.new(9, 0, true)
+	var disp_plain: Dictionary = RankSystem.buff_display(c_plain, 0)
+	_check(not bool(disp_plain.get("buffed", true)), "plain card needs no blue badge")
+
+	var g_base: PresidentGame = PresidentGame.new()
+	g_base.living = [0, 1]
+	g_base.hands = {
+		0: [c_base],
+		1: [CardData.new(8, 0, true)],
+	}
+	g_base.mods = chip_run
+	_check(g_base.base_of_rank(0, c_base.rank) == 5, "game resolves base_of_rank through inflation")
+	_check(g_base.play_power(0, c_base.rank) >= RankSystem.president_power(c_base.rank) + chip_run.rank_power_bonus(0, 5), "play power uses base-rank bonus")
+
+	# Combo buffs: conditions (rank / count / lead / last) + effects (mult / gold / chips / retrigger)
+	_check(ComboBuffDB.matches({"rank": 4, "count": 4}, 4, 4, false, false), "quad-4 condition matches four 4s")
+	_check(not ComboBuffDB.matches({"rank": 4, "count": 4}, 4, 3, false, false), "quad-4 does not match trips")
+	_check(not ComboBuffDB.matches({"rank": 4, "count": 4}, 5, 4, false, false), "quad-4 does not match four 5s")
+	_check(ComboBuffDB.matches({"rank": -1, "count": 2}, 9, 2, false, false), "any-pair matches a pair of 9s")
+	_check(ComboBuffDB.matches({"rank": -1, "count": 0, "last_card": true}, 7, 1, false, true), "last-card condition")
+	_check(not ComboBuffDB.matches({"rank": -1, "count": 0, "last_card": true}, 7, 1, false, false), "last-card requires emptying")
+	_check(ComboBuffDB.matches({"rank": 1, "count": 0, "lead": true}, 1, 2, true, false), "lead Ace condition")
+	_check(not ComboBuffDB.matches({"rank": 1, "count": 0, "lead": true}, 1, 2, false, false), "lead Ace requires lead")
+
+	var combo_run: RunManager = RunManager.new()
+	combo_run.start_new_run()
+	combo_run.gold = 100
+	combo_run.chips = 20
+	_check(combo_run.buy_upgrade("combo_quad_4", 14), "can buy Quad Fours")
+	_check(combo_run.combo_power_mult(0, 4, 4) == 4, "Quad Fours ×4 on four 4s")
+	_check(combo_run.combo_power_mult(0, 4, 3) == 1, "Quad Fours idle on trips of 4")
+	_check(combo_run.combo_power_mult(0, 5, 4) == 1, "Quad Fours idle on four 5s")
+	_check(combo_run.buy_upgrade("combo_quad_4", 14), "can level Quad Fours")
+	_check(combo_run.combo_power_mult(0, 4, 4) == 5, "leveled Quad Fours is ×5")
+	_check(combo_run.buy_upgrade("combo_quad_any", 18), "can buy Quad Force")
+	_check(combo_run.combo_power_mult(0, 4, 4) == 10, "Quad Fours × Quad Force stacks (5×2)")
+
+	var g_quad: PresidentGame = PresidentGame.new()
+	g_quad.living = [0, 1]
+	g_quad.hands = {
+		0: [CardData.new(4, 0, true), CardData.new(4, 1, true), CardData.new(4, 2, true), CardData.new(4, 3, true)],
+		1: [CardData.new(8, 0, true)],
+	}
+	g_quad.mods = combo_run
+	g_quad.current_player = 0
+	g_quad.lead = true
+	var pq: Dictionary = g_quad.play(0, {"rank": 4, "count": 4})
+	_check(bool(pq.get("ok", false)) and int(pq.get("mult", 1)) == 10, "play applies combo power mult")
+	_check(g_quad.trick_power == RankSystem.president_power(4) * 10, "trick power is base × mult")
+
+	combo_run.gold = 0
+	combo_run.chips = 0
+	combo_run.owned_upgrades.append("combo_pair_5_gold")
+	combo_run.owned_upgrades.append("combo_retrigger_5")
+	combo_run.bind_or_level_rank_effect(0, 5, "gold")
+	combo_run.bind_or_level_rank_effect(0, 5, "gold")
+	# Pair of 5s: rank gold fires twice (base + 1 retrigger) = 4, plus pair gold +3.
+	var pair_res: Dictionary = combo_run.trigger_rank_play(0, 5, [], 2, false, false)
+	_check(int(pair_res.get("retriggers", 0)) == 1, "Five Echo retriggers once on 5s")
+	_check(int(pair_res.get("gold", 0)) == 2 * 2 + 3, "retrigger doubles rank gold; pair mint pays")
+	_check(int(pair_res.get("chips", 0)) == 0, "combo payouts never grant chips")
+	_check(combo_run.gold == 7, "combo gold credited to seat")
+
+	combo_run.gold = 0
+	combo_run.owned_upgrades.append("combo_trips_3_gold")
+	var trip_res: Dictionary = combo_run.trigger_rank_play(0, 3, [], 3, false, false)
+	_check(int(trip_res.get("gold", 0)) == 3, "Triple Threes pays gold on three 3s")
+	_check(int(trip_res.get("chips", 0)) == 0, "Triple Threes grants no chips")
+	var miss_res: Dictionary = combo_run.trigger_rank_play(0, 3, [], 2, false, false)
+	_check(int(miss_res.get("gold", 0)) == 0, "Triple Threes idle on a pair of 3s")
+
+	combo_run.gold = 0
+	combo_run.owned_upgrades.append("combo_last_card_gold")
+	var exit_res: Dictionary = combo_run.trigger_rank_play(0, 9, [], 1, false, true)
+	_check(int(exit_res.get("gold", 0)) == 5, "Exit Bonus pays on emptying hand")
+	_check(combo_run.combo_short(0).contains("4"), "combo short badge lists owned combos")
+	_check(not ComboBuffDB.get_by_id("combo_quad_4").is_empty(), "ComboBuffDB lookup works")
+	_check(UpgradeDB.get_by_id("combo_retrigger_pair").get("effect", "") == "retrigger", "UpgradeDB resolves combo ids")
+	_check(UpgradeDB.get_by_id("combo_pair_7_gold").get("rank", 0) == 7, "rank-targeted combo names its rank")
+	_check(UpgradeDB.get_by_id("fx_power_13").get("rank", 0) == 13, "rank fx targets Kings")
+
+	combo_run.free()
+	chip_run.free()
+	econ.free()
+	scale_run.free()
 	run.free()
 	if _failures == 0:
 		print("ALL TESTS PASSED")

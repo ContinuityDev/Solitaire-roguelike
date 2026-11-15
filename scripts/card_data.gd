@@ -15,12 +15,15 @@ var enhancement: String = "" # EnhancementDB id, "" = none
 ## Printed rank when the card was dealt. Incumbent / Rally / Forge raise
 ## `rank` in place and leave this so the face can show the buff in blue.
 var origin_rank: int = 1
+## Classic deal-face (1–13) used to match rank customizations after inflation.
+var base_rank: int = 1
 
 func _init(p_rank: int = 1, p_suit: int = 0, p_face_up: bool = false) -> void:
 	rank = p_rank
 	suit = p_suit
 	face_up = p_face_up
 	origin_rank = p_rank
+	base_rank = p_rank
 
 func is_joker() -> bool:
 	return RankSystem.is_joker(rank)
@@ -43,8 +46,8 @@ func display_name() -> String:
 
 func pack() -> Array:
 	var row: Array = [rank, suit, enhancement]
-	if origin_rank > 0 and origin_rank != rank:
-		row.append(origin_rank)
+	row.append(origin_rank if origin_rank > 0 else rank)
+	row.append(base_rank if base_rank > 0 else rank)
 	return row
 
 static func unpack(row) -> CardData:
@@ -57,6 +60,12 @@ static func unpack(row) -> CardData:
 		c.enhancement = str(a[2])
 	if a.size() > 3:
 		c.origin_rank = int(a[3])
+	else:
+		c.origin_rank = c.rank
+	if a.size() > 4:
+		c.base_rank = int(a[4])
+	else:
+		c.base_rank = c.origin_rank if c.origin_rank > 0 else c.rank
 	return c
 
 static func pack_hand(cards: Array) -> Array:

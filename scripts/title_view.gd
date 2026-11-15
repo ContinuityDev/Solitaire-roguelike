@@ -44,16 +44,23 @@ func _init() -> void:
 	title.add_theme_color_override("font_color", Color(0.98, 0.90, 0.55))
 	col.add_child(title)
 	var sub: Label = Label.new()
-	sub.text = "Shed your hand. Survive the table.\nA magician’s cabinet of ranks, gold, and vetoes."
+	sub.text = "Shed your hand. Survive the table.\nEndless ante — ranks climb until you fall."
 	sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	sub.add_theme_font_size_override("font_size", 14)
 	sub.add_theme_color_override("font_color", Color(0.78, 0.82, 0.90))
 	col.add_child(sub)
+	var best_n: int = RunManager.load_best_round()
+	var best: Label = Label.new()
+	best.text = "Best run: round %d" % best_n if best_n > 0 else "Best run: —"
+	best.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	best.add_theme_font_size_override("font_size", 13)
+	best.add_theme_color_override("font_color", Color(0.92, 0.78, 0.35))
+	col.add_child(best)
 	var spacer: Control = Control.new()
 	spacer.custom_minimum_size = Vector2(0, 18)
 	col.add_child(spacer)
-	col.add_child(_mode_btn("Solo  /  vs AIs", "You versus five cabinet AIs. Same President run as before.", func() -> void: solo_pressed.emit()))
+	col.add_child(_mode_btn("Solo  /  vs AIs", "You versus five cabinet AIs. Endless run — survive escalating antes until you hit 0 HP.", func() -> void: solo_pressed.emit()))
 	col.add_child(_mode_btn("Local Lobby", "Host 2–6 seats. You are player one — rename yourself. Share the 4-letter table code. Empty seats stay AIs. Hotseat still works on this device.", func() -> void: lobby_pressed.emit()))
 	col.add_child(_mode_btn("Join Table", "Another browser, same page. Type the host’s table code and your name.", func() -> void: join_pressed.emit()))
 	var foot: Label = Label.new()

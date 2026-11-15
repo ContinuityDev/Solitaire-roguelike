@@ -96,6 +96,32 @@ static func _apply_favorite(hands: Dictionary, seat: int, rank: int, rng: Random
 			mine.append(card)
 			stolen += 1
 
+## Bump every non-joker card's face by `bonus` follow-power so mid/late-run
+## ranks read as large numbers while keeping relative order (and N-of-a-kind).
+static func inflate_hands(hands: Dictionary, bonus: int) -> void:
+	if bonus <= 0:
+		return
+	for seat in hands.keys():
+		inflate_card_list(hands[seat], bonus)
+
+static func inflate_card_list(cards: Array, bonus: int) -> void:
+	if bonus <= 0:
+		return
+	for c in cards:
+		inflate_card(c as CardData, bonus)
+
+static func inflate_card(card: CardData, bonus: int) -> void:
+	if card == null or bonus <= 0 or RankSystem.is_joker(card.rank):
+		return
+	# Keep base_rank as the classic deal-face so rank customizations still match.
+	if card.base_rank <= 0:
+		card.base_rank = card.rank
+	var nxt: int = RankSystem.inflate_rank(card.rank, bonus)
+	if nxt == card.rank:
+		return
+	card.rank = nxt
+	card.origin_rank = nxt
+
 static func _sort_hand(hand: Array) -> void:
 	hand.sort_custom(func(a: CardData, b: CardData) -> bool:
 		var pa: int = RankSystem.president_power(a.rank)
