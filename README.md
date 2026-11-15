@@ -3,14 +3,16 @@
 A cabinet shedding game. **Title screen** first — pick a mode:
 
 - **Solo / vs AIs** — you versus five cabinet AIs (the full President run).
-- **Local Lobby** — host 2–6 seats on this device. Mark seats Human or AI. **Hotseat / pass-the-device** (web + desktop). LAN/WebRTC join is not on the Pages build.
+- **Local Lobby** — host 2–6 seats. **Hotseat / pass-the-device** on this device (web + desktop). On the **desktop Godot build**, the same lobby also **listens on LAN** (UDP 24567). The host is always **player one** and can rename themselves. Empty seats stay AIs until a joiner sits.
+- **Join LAN** — desktop only. Type your name and the host’s IP. You take the next empty seat. GitHub Pages / the web export cannot host or join (browsers have no ENet).
 
 Play in the browser once GitHub Pages is on: https://continuitydev.github.io/Solitaire-roguelike/
 
 ### How to start
 1. Open the game. You land on **PRESIDENT / THE CABINET**, not in a run.
 2. **Solo / vs AIs** starts a 6-seat run immediately (you + five AIs). **Title** on the table (or game-over) returns to the menu. **New Run** restarts the same mode.
-3. **Local Lobby** — name and a 4-character code (flavor for the table), **+/– seats** (2–6), each row **Human** or **AI**. Seat 1 is the host (always human). **Empty → AI** fills the rest. **Start** deals. When another human’s turn (or desk) comes up, **Pass the device** covers the cards until they tap **I’m P#**.
+3. **Local Lobby** — table name, **your name** (player one), a 4-character code, **+/– seats** (2–6), each row **Human** or **AI**. Seat 1 is the host (always human). **Empty → AI** fills the rest. **Start** deals. On desktop the lobby prints the listen address (`UDP 24567` plus your LAN IPs). Two windows on one machine: join `127.0.0.1`. When another *local* human’s turn comes up, **Pass the device** covers the cards until they tap **I’m P#**. LAN joiners play on their own box — no pass-the-phone, and they only see their own hand.
+4. **Join LAN** — your name, host IP, **Sit down**. Wait for the host to Start. If they leave, you drop back to title. If you disconnect mid-run, the host turns your seat into an AI.
 
 Last living **human** wins the run. If every human hits 0 HP, the cabinet outlasts you.
 

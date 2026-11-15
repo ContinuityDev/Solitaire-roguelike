@@ -2,18 +2,25 @@ class_name LobbyView
 extends Control
 
 ## Host a local hotseat lobby: seat count, human vs AI, start.
+## Desktop also listens on LAN (host is player one).
 
 signal started(config: LobbyConfig)
 signal cancelled
+signal host_name_changed(player_name: String)
 
 var config: LobbyConfig = LobbyConfig.new()
+var lan_host: bool = false
 var _name_edit: LineEdit
+var _you_edit: LineEdit
 var _code_lab: Label
 var _count_lab: Label
 var _fill_btn: Button
 var _rows: VBoxContainer
 var _start_btn: Button
 var _status: Label
+var _lan_lab: Label
+var _title_lab: Label
+var _hint: Label
 
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -32,22 +39,22 @@ func _ready() -> void:
 	var col: VBoxContainer = VBoxContainer.new()
 	col.add_theme_constant_override("separation", 8)
 	pad.add_child(col)
-	var title: Label = Label.new()
-	title.text = "LOCAL LOBBY"
-	title.add_theme_font_size_override("font_size", 22)
-	title.add_theme_color_override("font_color", Color(0.92, 0.78, 0.35))
-	col.add_child(title)
-	var hint: Label = Label.new()
-	hint.text = "Pass-the-device on this phone or desktop. Empty seats become AIs when you toggle Fill."
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.add_theme_font_size_override("font_size", 12)
-	hint.add_theme_color_override("font_color", Color(0.72, 0.76, 0.84))
-	col.add_child(hint)
+	_title_lab = Label.new()
+	_title_lab.text = "LOCAL LOBBY"
+	_title_lab.add_theme_font_size_override("font_size", 22)
+	_title_lab.add_theme_color_override("font_color", Color(0.92, 0.78, 0.35))
+	col.add_child(_title_lab)
+	_hint = Label.new()
+	_hint.text = "Pass-the-device on this phone or desktop. Empty seats become AIs when you toggle Fill."
+	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_hint.add_theme_font_size_override("font_size", 12)
+	_hint.add_theme_color_override("font_color", Color(0.72, 0.76, 0.84))
+	col.add_child(_hint)
 	var name_row: HBoxContainer = HBoxContainer.new()
 	name_row.add_theme_constant_override("separation", 8)
 	col.add_child(name_row)
 	var nl: Label = Label.new()
-	nl.text = "Name"
+	nl.text = "Table"
 	nl.custom_minimum_size = Vector2(52, 0)
 	name_row.add_child(nl)
 	_name_edit = LineEdit.new()
@@ -59,6 +66,24 @@ func _ready() -> void:
 	_code_lab.add_theme_font_size_override("font_size", 16)
 	_code_lab.add_theme_color_override("font_color", Color(0.98, 0.90, 0.55))
 	name_row.add_child(_code_lab)
+	var you_row: HBoxContainer = HBoxContainer.new()
+	you_row.add_theme_constant_override("separation", 8)
+	col.add_child(you_row)
+	var yl: Label = Label.new()
+	yl.text = "You"
+	yl.custom_minimum_size = Vector2(52, 0)
+	you_row.add_child(yl)
+	_you_edit = LineEdit.new()
+	_you_edit.placeholder_text = "Player one"
+	_you_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_you_edit.max_length = 18
+	_you_edit.text_changed.connect(_on_you_changed)
+	you_row.add_child(_you_edit)
+	_lan_lab = Label.new()
+	_lan_lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_lan_lab.add_theme_font_size_override("font_size", 12)
+	_lan_lab.add_theme_color_override("font_color", Color(0.70, 0.88, 0.72))
+	col.add_child(_lan_lab)
 	var count_row: HBoxContainer = HBoxContainer.new()
 	count_row.add_theme_constant_override("separation", 8)
 	col.add_child(count_row)
@@ -111,16 +136,42 @@ func _ready() -> void:
 	_start_btn.pressed.connect(_on_start)
 	btns.add_child(_start_btn)
 
-func present(fresh: bool = true) -> void:
+func present(fresh: bool = true, as_lan: bool = false) -> void:
+	lan_host = as_lan
 	if fresh:
 		config = LobbyConfig.new()
 		config.lobby_name = "The Cabinet"
+		config.lan = as_lan
 		config.set_seat_count(6)
 		config.fill_empty_with_ai()
 		config.set_kind(0, LobbyConfig.KIND_HUMAN)
+		config.set_display_name(0, "You")
 	_name_edit.text = config.lobby_name
+	_you_edit.text = config.name_of(0)
+	_title_lab.text = "LAN TABLE" if lan_host else "LOCAL LOBBY"
+	if lan_host:
+		_hint.text = "You are player one. Joiners on this Wi-Fi take empty seats. Leftover seats stay AIs. Hotseat Human toggles stay for people on this device."
+	else:
+		_hint.text = "Pass-the-device on this phone or desktop. Empty seats become AIs when you toggle Fill."
 	_rebuild()
 	visible = true
+
+func host_player_name() -> String:
+	if _you_edit:
+		var t: String = _you_edit.text.strip_edges()
+		if t != "":
+			return t
+	return config.name_of(0)
+
+func set_lan_status(t: String) -> void:
+	if _lan_lab:
+		_lan_lab.text = t
+		_lan_lab.visible = t != ""
+
+func _on_you_changed(t: String) -> void:
+	config.set_display_name(0, t)
+	host_name_changed.emit(config.name_of(0))
+	_rebuild()
 
 func _rebuild() -> void:
 	_code_lab.text = "code %s" % config.lobby_code
@@ -133,11 +184,17 @@ func _rebuild() -> void:
 	var ok: bool = config.can_start()
 	_start_btn.disabled = not ok
 	if ok:
-		_status.text = "%d human  ·  %d AI  ·  hotseat %s" % [
-			config.human_count(), config.ai_seats().size(),
-			"ON" if config.is_hotseat() else "off (solo table)"]
+		if lan_host:
+			_status.text = "%d human  ·  %d AI  ·  you lead as player one" % [
+				config.human_count(), config.ai_seats().size()]
+		else:
+			_status.text = "%d human  ·  %d AI  ·  hotseat %s" % [
+				config.human_count(), config.ai_seats().size(),
+				"ON" if config.is_hotseat() else "off (solo table)"]
 	else:
 		_status.text = "Need at least one human seat."
+	if _you_edit and _you_edit.text.strip_edges() == "":
+		_you_edit.placeholder_text = config.name_of(0)
 
 func _make_seat_row(seat: int) -> PanelContainer:
 	var wrap: PanelContainer = PanelContainer.new()
@@ -163,7 +220,7 @@ func _make_seat_row(seat: int) -> PanelContainer:
 	row.add_child(lab)
 	if seat == 0:
 		var host: Label = Label.new()
-		host.text = "HOST"
+		host.text = "P1 HOST"
 		host.add_theme_font_size_override("font_size", 11)
 		host.add_theme_color_override("font_color", Color(0.92, 0.78, 0.35))
 		row.add_child(host)

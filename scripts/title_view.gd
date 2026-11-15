@@ -5,6 +5,7 @@ extends Control
 
 signal solo_pressed
 signal lobby_pressed
+signal join_pressed
 
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -51,9 +52,13 @@ func _ready() -> void:
 	spacer.custom_minimum_size = Vector2(0, 18)
 	col.add_child(spacer)
 	col.add_child(_mode_btn("Solo  /  vs AIs", "You versus five cabinet AIs. Same President run as before.", func() -> void: solo_pressed.emit()))
-	col.add_child(_mode_btn("Local Lobby", "Hotseat on this device. 2–6 seats, humans or AIs. Pass the phone.", func() -> void: lobby_pressed.emit()))
+	col.add_child(_mode_btn("Local Lobby", "Host 2–6 seats. Hotseat on this device, or LAN listen on desktop (you are player one).", func() -> void: lobby_pressed.emit()))
+	col.add_child(_mode_btn("Join LAN", "Sit at a host on this Wi-Fi. Rename yourself. Desktop Godot only — not the web page.", func() -> void: join_pressed.emit()))
 	var foot: Label = Label.new()
-	foot.text = "Web build is pass-the-device. LAN join is not on this export."
+	if NetSession.lan_supported():
+		foot.text = "LAN is UDP %d. Two windows on one machine: join 127.0.0.1." % NetSession.PORT
+	else:
+		foot.text = "This web page is pass-the-device. LAN host/join needs the desktop Godot build."
 	foot.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	foot.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	foot.add_theme_font_size_override("font_size", 11)
