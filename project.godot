@@ -1,0 +1,45 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="Abracadabra! Solitaire Roguelike"
+config/description="A stage-magic Balatro-like roguelike built on Klondike solitaire. Perform tricks in acts, earn applause and Flair, collect props, and escalate past Kings to Emperors and Deities."
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.3", "GL Compatibility")
+config/icon="res://icon.svg"
+
+[display]
+
+; Base size is a portrait phone (390x844). With stretch "expand", the logical
+; viewport keeps that width on phones and expands on wider/taller screens
+; (desktop launches at the 1280x800 override below), and
+; Main._apply_responsive_layout() sizes cards/HUD from the live logical size,
+; so the board reflows per device instead of shrinking a fixed 1280 board.
+window/size/viewport_width=390
+window/size/viewport_height=844
+window/size/window_width_override=1280
+window/size/window_height_override=800
+window/size/resizable=true
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+
+[input_devices]
+
+; Touch drives everything: touches emulate mouse (all game input is
+; click/tap based, no hover or right-click), and the game also handles
+; raw InputEventScreenTouch in CardView as a fallback.
+pointing/emulate_mouse_from_touch=true
+pointing/emulate_touch_from_mouse=true
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

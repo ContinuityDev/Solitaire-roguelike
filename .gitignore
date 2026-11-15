@@ -1,0 +1,21 @@
+# Godot 4
+.godot/
+.import/
+export.cfg
+*.translation
+
+# Export artifacts (the committed web export in docs/ is intentionally NOT ignored)
+android-build/
+*.apk
+*.aab
+web-build/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Godot must not import the hosted web export
+docs/*.import
