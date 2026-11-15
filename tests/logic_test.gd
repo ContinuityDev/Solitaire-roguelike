@@ -526,6 +526,76 @@ func _init() -> void:
 	gp.trick_power = 7
 	var ai_locked: Dictionary = PresidentAI.choose(gp, 1, 1)
 	_check(bool(ai_locked.get("pass", false)), "AI passes when locked out of the pile")
+
+	# AI joker path (owner report: round ended when an AI played a joker).
+	# Legacy bug dumped the AI hand and called _resolve_joker_round().
+	var src_pg: String = FileAccess.get_file_as_string("res://scripts/president_game.gd")
+	_check(not src_pg.contains("_resolve_joker_round"), "legacy _resolve_joker_round is gone")
+	_check(src_pg.contains("JOKER — pile cleared"), "joker label is pile cleared, not round over")
+	_check(not src_pg.contains("JOKER — round over"), "old joker round-over label is gone")
+	var g_ai_j: PresidentGame = PresidentGame.new()
+	g_ai_j.living = [0, 1, 2, 3, 4, 5]
+	g_ai_j.hands = {
+		0: [CardData.new(12, 0, true), CardData.new(4, 0, true)],
+		1: [CardData.new(RankSystem.JOKER, 0, true), CardData.new(3, 1, true), CardData.new(6, 2, true)],
+		2: [CardData.new(7, 0, true)],
+		3: [CardData.new(8, 0, true)],
+		4: [CardData.new(9, 0, true)],
+		5: [CardData.new(10, 0, true)],
+	}
+	g_ai_j.current_player = 0
+	g_ai_j.lead = true
+	g_ai_j.play(0, {"rank": 12, "count": 1})
+	g_ai_j.pass_turn(2)
+	g_ai_j.pass_turn(3)
+	g_ai_j.current_player = 1
+	var ai_choice: Dictionary = PresidentAI.choose(g_ai_j, 1, 1)
+	_check(not bool(ai_choice.get("pass", true)), "AI elects to play vs King when holding joker")
+	_check(RankSystem.is_joker(int(ai_choice.get("combo", {}).get("rank", -1))), "AI chooses the joker (same path as _ai_act)")
+	var before_ai_hand: int = g_ai_j.hand_of(1).size()
+	var ai_play: Dictionary = g_ai_j.play(1, ai_choice["combo"])
+	_check(bool(ai_play.get("joker", false)) and bool(ai_play.get("clear", false)), "AI joker play clears the pile")
+	_check(not g_ai_j.round_over, "AI joker does not end the round")
+	_check(g_ai_j.finished.is_empty(), "AI mid-hand joker does not finish the seat")
+	_check(g_ai_j.hand_of(1).size() == before_ai_hand - 1, "AI joker dumps only itself, not the hand")
+	_check(g_ai_j.lead and g_ai_j.current_player == 1, "AI joker player leads the next pile")
+	_check(g_ai_j.active_seats().size() == 6, "six seats still active after AI joker")
+	# Bomb follow: AI prefers joker when nothing else beats it.
+	var g_ai_bomb: PresidentGame = PresidentGame.new()
+	g_ai_bomb.living = [0, 1, 2]
+	g_ai_bomb.hands = {
+		0: [CardData.new(2, 0, true)],
+		1: [CardData.new(RankSystem.JOKER, 1, true), CardData.new(5, 0, true)],
+		2: [CardData.new(6, 0, true)],
+	}
+	g_ai_bomb.current_player = 0
+	g_ai_bomb.lead = true
+	g_ai_bomb.play(0, {"rank": 2, "count": 1})
+	g_ai_bomb.current_player = 1
+	var bomb_choice: Dictionary = PresidentAI.choose(g_ai_bomb, 1, 1)
+	_check(RankSystem.is_joker(int(bomb_choice.get("combo", {}).get("rank", -1))), "AI plays joker over a bomb when that is the only follow")
+	var bomb_play: Dictionary = g_ai_bomb.play(1, bomb_choice["combo"])
+	_check(bool(bomb_play.get("joker", false)) and not g_ai_bomb.round_over, "AI joker vs bomb clears pile; round continues")
+	_check(g_ai_bomb.hand_of(1).size() == 1, "AI keeps non-joker cards after bomb-clear joker")
+	# Last-card AI joker finishes the seat but not the round.
+	var g_ai_last: PresidentGame = PresidentGame.new()
+	g_ai_last.living = [0, 1, 2, 3]
+	g_ai_last.hands = {
+		0: [CardData.new(5, 0, true)],
+		1: [CardData.new(RankSystem.JOKER, 0, true)],
+		2: [CardData.new(6, 0, true)],
+		3: [CardData.new(7, 0, true)],
+	}
+	g_ai_last.lead = false
+	g_ai_last.trick_rank = 10
+	g_ai_last.trick_count = 1
+	g_ai_last.trick_power = 10
+	g_ai_last.trick_player = 0
+	g_ai_last.current_player = 1
+	var last_j: Dictionary = g_ai_last.play(1, {"rank": RankSystem.JOKER, "count": 1})
+	_check(bool(last_j.get("finished", false)), "AI last-card joker finishes that seat")
+	_check(not g_ai_last.round_over, "AI last-card joker does not end round while others remain")
+
 	# After a pass, turn never returns to that seat until the pile ends.
 	var gs: PresidentGame = PresidentGame.new()
 	gs.living = [0, 1, 2, 3]
@@ -616,23 +686,23 @@ func _init() -> void:
 	_check(bought, "an AI inventory is no longer empty after shopping")
 	_check(ai_run.gold_of(1) < 40, "AI gold was spent")
 	ai_run.actions_of(2).append("filibuster")
-	var gai: PresidentGame = PresidentGame.new()
-	gai.living = [0, 1, 2]
-	gai.hands = {
+	var g_fili: PresidentGame = PresidentGame.new()
+	g_fili.living = [0, 1, 2]
+	g_fili.hands = {
 		0: [CardData.new(4, 0, true)],
 		1: [CardData.new(5, 0, true)],
 		2: [CardData.new(6, 0, true), CardData.new(7, 0, true)],
 	}
-	gai.current_player = 2
-	gai.lead = false
-	gai.trick_rank = 4
-	gai.trick_count = 1
-	var pick_act: String = PresidentAI.choose_turn_action(gai, ai_run, 2)
+	g_fili.current_player = 2
+	g_fili.lead = false
+	g_fili.trick_rank = 4
+	g_fili.trick_count = 1
+	var pick_act: String = PresidentAI.choose_turn_action(g_fili, ai_run, 2)
 	_check(pick_act == "filibuster", "AI with Filibuster spends it on a follow (%s)" % pick_act)
 	_check(ai_run.spend_action_for(2, "filibuster"), "AI spend_action_for removes Filibuster")
-	var fx: Dictionary = ActionFx.apply_turn(gai, ai_run, 2, "filibuster")
+	var fx: Dictionary = ActionFx.apply_turn(g_fili, ai_run, 2, "filibuster")
 	_check(bool(fx.get("ok", false)), "AI Filibuster applies")
-	_check(gai.must_pass_seat == ActionFx.next_opponent(gai, 2), "Filibuster marks the next opponent")
+	_check(g_fili.must_pass_seat == ActionFx.next_opponent(g_fili, 2), "Filibuster marks the next opponent")
 	_check(str(fx.get("message", "")).find("Filibuster") >= 0, "use is logged")
 	ai_run.actions_of(1).append("uprising")
 	ai_run.last_finish = [0, 2, 3, 4, 5, 1]

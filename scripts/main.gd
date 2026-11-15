@@ -2,6 +2,9 @@ extends Control
 
 ## President. Title → Solo vs AIs, hotseat lobby, or a joinable table (host = P1).
 
+## Bump when shipping a web export to docs/ so Pages playtesters can confirm the build.
+const BUILD_ID: String = "14"
+
 signal trade_confirmed
 
 var run: RunManager
@@ -106,7 +109,7 @@ func _build_ui() -> void:
 	root.add_theme_constant_override("separation", 6)
 	pad.add_child(root)
 	_title = Label.new()
-	_title.text = "PRESIDENT"
+	_title.text = "PRESIDENT  ·  b%s" % BUILD_ID
 	_title.add_theme_color_override("font_color", Color(0.92, 0.78, 0.35))
 	_title.add_theme_font_size_override("font_size", 22)
 	root.add_child(_title)

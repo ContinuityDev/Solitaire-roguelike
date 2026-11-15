@@ -49,7 +49,7 @@ static func full_name(rank: int) -> String:
 
 ## President shedding power. 3 is weakest, Ace is high, 2 is the bomb.
 ## Super ranks (16+) use their id as power so inflation can climb forever.
-## Jokers are not a follow rank (they end the round); sort them last.
+## Jokers are not a follow rank (they clear the pile); sort them last.
 static func president_power(rank: int) -> int:
 	if is_joker(rank):
 		return 100
