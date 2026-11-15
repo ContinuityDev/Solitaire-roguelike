@@ -1,136 +1,113 @@
 extends Control
 
-## Main scene: builds the whole UI in code (no art assets), wires the pure
-## SolitaireBoard logic to CardViews, and drives the roguelike loop:
-##   play round -> meet target / clear board -> shop (pick 1 of 3) -> next ante
-## Controls: click a card to select, click a destination to move.
-## Double-click a card to send it to its foundation. Click stock to draw.
-
-# Card size / overlap are computed from the live viewport in
-# _apply_responsive_layout() so portrait phones and desktop both fit.
-var _card_size: Vector2 = Vector2(86, 120)
-var _overlap: float = 30.0
-var _gap: float = 12.0
-var _ui_ready: bool = false
-var _title_label: Label
-var _hud_labels: Array = []
+## President vs five AIs. Seat 0 is you.
 
 var run: RunManager
-var board: SolitaireBoard
-
-var _score_label: Label
-var _target_label: Label
-var _mult_label: Label
-var _deck_label: Label
-var _message_label: Label
-var _peek_label: Label
-var _combo_label: Label
-var _boss_label: Label
-var _ranks_label: Label
-var _score_msg: String = ""
-var _cash_out_btn: Button
-var _top_row: HBoxContainer
-var _tableau_row: HBoxContainer
-var _board_area: VBoxContainer
+var game: PresidentGame
+var _ui_ready: bool = false
+var _title: Label
+var _hud: Label
+var _msg: Label
+var _ai_row: HBoxContainer
+var _trick_label: Label
+var _trick_cards: HBoxContainer
+var _hand_row: Control
+var _btn_row: HFlowContainer
+var _action_row: HFlowContainer
+var _play_btn: Button
+var _pass_btn: Button
 var _shop: Shop
 var _overlay: PanelContainer
 var _overlay_title: Label
 var _overlay_body: Label
 var _overlay_buttons: HBoxContainer
+var _selected: Array = [] # CardData
+var _card_size: Vector2 = Vector2(58, 82)
+var _ai_timer: Timer
+var _busy: bool = false
+var _shop_upgrades: Array = []
+var _shop_actions: Array = []
 
-var _selection: Dictionary = {} # empty = nothing selected
+const AI_COLORS: Array = [
+	Color(0.55, 0.22, 0.22),
+	Color(0.22, 0.45, 0.28),
+	Color(0.22, 0.32, 0.55),
+	Color(0.50, 0.38, 0.12),
+	Color(0.40, 0.22, 0.48),
+]
 
 func _ready() -> void:
 	run = RunManager.new()
 	add_child(run)
-	board = SolitaireBoard.new()
+	game = PresidentGame.new()
 	_build_ui()
-	run.score_changed.connect(_refresh_header)
-	get_tree().root.size_changed.connect(_on_window_resized)
+	run.changed.connect(_refresh_hud)
+	get_tree().root.size_changed.connect(func() -> void: if _ui_ready: _refresh())
 	_ui_ready = true
-	_apply_responsive_layout()
 	run.start_new_run()
 	_start_round()
-	_message("The curtain rises! Deck: A-%s. Tap the stock to draw, tap cards to move them." % RankSystem.full_name(run.max_rank))
 
 func _build_ui() -> void:
 	var bg: ColorRect = ColorRect.new()
-	bg.color = Color(0.09, 0.05, 0.20)  # midnight velvet stage
+	bg.color = Color(0.07, 0.12, 0.22)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
-
 	var pad: MarginContainer = MarginContainer.new()
-	pad.add_theme_constant_override("margin_left", 16)
-	pad.add_theme_constant_override("margin_right", 16)
-	pad.add_theme_constant_override("margin_top", 10)
-	pad.add_theme_constant_override("margin_bottom", 10)
+	pad.add_theme_constant_override("margin_left", 10)
+	pad.add_theme_constant_override("margin_right", 10)
+	pad.add_theme_constant_override("margin_top", 8)
+	pad.add_theme_constant_override("margin_bottom", 8)
 	pad.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(pad)
 	var root: VBoxContainer = VBoxContainer.new()
-	root.add_theme_constant_override("separation", 8)
+	root.add_theme_constant_override("separation", 6)
 	pad.add_child(root)
-
-	_title_label = Label.new()
-	_title_label.text = "ABRACADABRA! SOLITAIRE"
-	_title_label.add_theme_color_override("font_color", Color(0.92, 0.74, 0.32))
-	_title_label.add_theme_font_size_override("font_size", 26)
-	root.add_child(_title_label)
-
-	# 2-column grid: HUD reflows to 2x2 on narrow (portrait phone) screens
-	# instead of clipping a single long row.
-	var header: GridContainer = GridContainer.new()
-	header.columns = 2
-	header.add_theme_constant_override("h_separation", 14)
-	header.add_theme_constant_override("v_separation", 2)
-	root.add_child(header)
-	_score_label = _make_label(header, "Applause: 0")
-	_target_label = _make_label(header, "Target: 0")
-	_mult_label = _make_label(header, "Flair: x1.0")
-	_deck_label = _make_label(header, "")
-	_combo_label = _make_label(header, "Encore: -")
-	_boss_label = _make_label(header, "")
-	_ranks_label = Label.new()
-	_ranks_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_ranks_label.add_theme_font_size_override("font_size", 12)
-	root.add_child(_ranks_label)
-
-	# HFlowContainer wraps buttons onto a second row on narrow phone screens.
-	var buttons: HFlowContainer = HFlowContainer.new()
-	buttons.add_theme_constant_override("h_separation", 8)
-	buttons.add_theme_constant_override("v_separation", 8)
-	root.add_child(buttons)
-	_cash_out_btn = Button.new()
-	_cash_out_btn.text = "Take a Bow (target met!)"
-	_cash_out_btn.disabled = true
-	_cash_out_btn.pressed.connect(_on_cash_out)
-	_cash_out_btn.custom_minimum_size = Vector2(0, 44)
-	buttons.add_child(_cash_out_btn)
-	var hint_btn: Button = Button.new()
-	hint_btn.text = "Hint"
-	hint_btn.pressed.connect(_on_hint)
-	hint_btn.custom_minimum_size = Vector2(64, 44)
-	buttons.add_child(hint_btn)
-	var restart_btn: Button = Button.new()
-	restart_btn.text = "Restart Run"
-	restart_btn.pressed.connect(func() -> void: run.start_new_run(); _start_round(); _message("Encore from the top! Deck back to A-5."))
-	restart_btn.custom_minimum_size = Vector2(0, 44)
-	buttons.add_child(restart_btn)
-
-	_message_label = Label.new()
-	_message_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	root.add_child(_message_label)
-	_peek_label = Label.new()
-	root.add_child(_peek_label)
-
-	_top_row = HBoxContainer.new()
-	_top_row.add_theme_constant_override("separation", 14)
-	root.add_child(_top_row)
-
-	_tableau_row = HBoxContainer.new()
-	_tableau_row.add_theme_constant_override("separation", 14)
-	_tableau_row.alignment = BoxContainer.ALIGNMENT_BEGIN
-	root.add_child(_tableau_row)
-
+	_title = Label.new()
+	_title.text = "PRESIDENT"
+	_title.add_theme_color_override("font_color", Color(0.92, 0.78, 0.35))
+	_title.add_theme_font_size_override("font_size", 22)
+	root.add_child(_title)
+	_hud = Label.new()
+	_hud.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_hud.add_theme_font_size_override("font_size", 13)
+	root.add_child(_hud)
+	_ai_row = HBoxContainer.new()
+	_ai_row.add_theme_constant_override("separation", 6)
+	root.add_child(_ai_row)
+	_trick_label = Label.new()
+	_trick_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	root.add_child(_trick_label)
+	_trick_cards = HBoxContainer.new()
+	_trick_cards.alignment = BoxContainer.ALIGNMENT_CENTER
+	root.add_child(_trick_cards)
+	_msg = Label.new()
+	_msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_msg.add_theme_font_size_override("font_size", 13)
+	root.add_child(_msg)
+	_hand_row = Control.new()
+	_hand_row.custom_minimum_size = Vector2(0, 110)
+	root.add_child(_hand_row)
+	_btn_row = HFlowContainer.new()
+	_btn_row.add_theme_constant_override("h_separation", 8)
+	root.add_child(_btn_row)
+	_play_btn = Button.new()
+	_play_btn.text = "Play"
+	_play_btn.custom_minimum_size = Vector2(90, 44)
+	_play_btn.pressed.connect(_on_play)
+	_btn_row.add_child(_play_btn)
+	_pass_btn = Button.new()
+	_pass_btn.text = "Pass"
+	_pass_btn.custom_minimum_size = Vector2(90, 44)
+	_pass_btn.pressed.connect(_on_pass)
+	_btn_row.add_child(_pass_btn)
+	var restart: Button = Button.new()
+	restart.text = "New Run"
+	restart.custom_minimum_size = Vector2(90, 44)
+	restart.pressed.connect(func() -> void: run.start_new_run(); _start_round())
+	_btn_row.add_child(restart)
+	_action_row = HFlowContainer.new()
+	_action_row.add_theme_constant_override("h_separation", 6)
+	root.add_child(_action_row)
 	var shop_holder: CenterContainer = CenterContainer.new()
 	shop_holder.set_anchors_preset(Control.PRESET_FULL_RECT)
 	shop_holder.visible = false
@@ -138,403 +115,388 @@ func _build_ui() -> void:
 	_shop = Shop.new()
 	shop_holder.add_child(_shop)
 	_shop.visibility_changed.connect(func() -> void: shop_holder.visible = _shop.visible)
-	_shop.choice_made.connect(_on_shop_choice)
-	_shop.skipped.connect(_on_shop_done)
-
-	var overlay_holder: CenterContainer = CenterContainer.new()
-	overlay_holder.set_anchors_preset(Control.PRESET_FULL_RECT)
-	overlay_holder.visible = false
-	add_child(overlay_holder)
+	_shop.bought_upgrade.connect(_on_buy_upgrade)
+	_shop.bought_action.connect(_on_buy_action)
+	_shop.closed.connect(_on_shop_closed)
+	var ovh: CenterContainer = CenterContainer.new()
+	ovh.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ovh.visible = false
+	add_child(ovh)
 	_overlay = PanelContainer.new()
 	_overlay.visible = false
-	overlay_holder.add_child(_overlay)
-	_overlay.visibility_changed.connect(func() -> void: overlay_holder.visible = _overlay.visible)
+	ovh.add_child(_overlay)
+	_overlay.visibility_changed.connect(func() -> void: ovh.visible = _overlay.visible)
 	var om: MarginContainer = MarginContainer.new()
-	om.add_theme_constant_override("margin_left", 24)
-	om.add_theme_constant_override("margin_right", 24)
-	om.add_theme_constant_override("margin_top", 20)
-	om.add_theme_constant_override("margin_bottom", 20)
+	om.add_theme_constant_override("margin_left", 20)
+	om.add_theme_constant_override("margin_right", 20)
+	om.add_theme_constant_override("margin_top", 16)
+	om.add_theme_constant_override("margin_bottom", 16)
 	_overlay.add_child(om)
 	var ov: VBoxContainer = VBoxContainer.new()
-	ov.add_theme_constant_override("separation", 10)
 	om.add_child(ov)
 	_overlay_title = Label.new()
-	_overlay_title.add_theme_font_size_override("font_size", 30)
+	_overlay_title.add_theme_font_size_override("font_size", 26)
 	ov.add_child(_overlay_title)
 	_overlay_body = Label.new()
 	_overlay_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	ov.add_child(_overlay_body)
 	_overlay_buttons = HBoxContainer.new()
-	_overlay_buttons.add_theme_constant_override("separation", 8)
 	ov.add_child(_overlay_buttons)
-
-func _make_label(parent: Control, text: String) -> Label:
-	var l: Label = Label.new()
-	l.text = text
-	l.add_theme_font_size_override("font_size", 18)
-	l.clip_text = true
-	l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	parent.add_child(l)
-	_hud_labels.append(l)
-	return l
-
-func _on_window_resized() -> void:
-	if not _ui_ready:
-		return
-	_apply_responsive_layout()
-	_refresh()
-
-## Fit cards + HUD to the current viewport (portrait phone, landscape, web).
-## Card width is driven by the widest row (tableau columns, min 6 for the
-## stock/waste/foundation row), clamped so tap targets stay >= ~38 px wide
-## (46 px at 390 px wide, 92 px max on desktop).
-func _apply_responsive_layout() -> void:
-	var vw: float = size.x if size.x > 10.0 else 1280.0
-	var cols: int = 6
-	if board != null and not board.tableau.is_empty():
-		cols = maxi(cols, board.tableau.size())
-	_gap = 6.0 if vw < 600.0 else 12.0
-	var w: float = floorf((vw - 32.0 - float(cols - 1) * _gap) / float(cols))
-	w = clampf(w, 38.0, 92.0)
-	_card_size = Vector2(w, w * 1.4)
-	_overlap = _card_size.y * 0.26
-	if _top_row != null:
-		_top_row.add_theme_constant_override("separation", int(_gap))
-	if _tableau_row != null:
-		_tableau_row.add_theme_constant_override("separation", int(_gap))
-	var narrow: bool = vw < 640.0
-	if _title_label != null:
-		_title_label.add_theme_font_size_override("font_size", 19 if narrow else 26)
-	for l in _hud_labels:
-		(l as Label).add_theme_font_size_override("font_size", 13 if narrow else 18)
-		(l as Label).custom_minimum_size = Vector2(maxf(90.0, (vw - 46.0) / 2.0), 0)
-	if _message_label != null:
-		_message_label.add_theme_font_size_override("font_size", 13 if narrow else 16)
-
-
-# ---------------------------------------------------------------- rounds
+	_ai_timer = Timer.new()
+	_ai_timer.one_shot = true
+	_ai_timer.wait_time = 0.55
+	_ai_timer.timeout.connect(_ai_act)
+	add_child(_ai_timer)
 
 func _start_round() -> void:
-	_selection = {}
 	_overlay.visible = false
-	board.wild_low = run.has_upgrade("wild_low")
-	board.setup(run.max_rank, run.rng, run.extra_columns(), run.redeals_for_round(), run.enhancement_assignments)
-	_refresh()
-	_refresh_header()
-	var twist2: Dictionary = run.boss_twist()
-	if not twist2.is_empty():
-		_message("THE GRAND ILLUSION BEGINS: %s - %s" % [str(twist2["name"]), str(twist2["desc"])])
-
-func _refresh_header() -> void:
-	if run == null:
+	_shop.visible = false
+	_selected.clear()
+	_busy = false
+	if run.run_over:
+		_show_run_over()
 		return
-	var narrow: bool = size.x < 640.0
-	if narrow:
-		_score_label.text = "Applause: %d" % run.score
-		_target_label.text = "Act %d · Target: %d" % [run.ante, run.target]
-		_mult_label.text = "Flair x%.2f · Streak %d · Moves %d" % [run.effective_mult(), run.streak, run.moves]
-		_deck_label.text = "A-%s · %dc · Redeal %d · F %d/%d" % [
-			RankSystem.short_label(run.max_rank), board.total_cards(), board.redeals_left,
-			board.foundation_count(), board.total_cards()]
-	else:
-		_score_label.text = "Applause: %d" % run.score
-		_target_label.text = "Act %d  Applause target: %d" % [run.ante, run.target]
-		_mult_label.text = "Flair: x%.2f  Streak: %d  Moves: %d" % [run.effective_mult(), run.streak, run.moves]
-		_deck_label.text = "Deck: A-%s (%d cards)  Redeals: %d  Finale piles: %d/%d" % [
-			RankSystem.full_name(run.max_rank), board.total_cards(), board.redeals_left,
-			board.foundation_count(), board.total_cards()]
-	_cash_out_btn.disabled = not (run.round_active and run.score >= run.target)
-	_combo_label.text = run.combo_text()
-	var twist: Dictionary = run.boss_twist()
-	if twist.is_empty():
-		var next_boss: int = (run.ante - 1) / 3 * 3 + 3
-		_boss_label.text = "Next Grand Illusion: Act %d" % next_boss
-		_boss_label.add_theme_color_override("font_color", Color(0.92, 0.74, 0.32))
-	else:
-		_boss_label.text = "GRAND ILLUSION: %s" % str(twist["name"])
-	_boss_label.add_theme_color_override("font_color", Color(1.0, 0.45, 0.40))
-	var rank_parts: Array[String] = []
-	for r in range(1, run.max_rank + 1):
-		var lv: int = run.rank_level(r)
-		rank_parts.append("%s Lv%d%s" % [RankSystem.short_label(r), lv, "*" if lv > 1 else ""])
-	_ranks_label.text = "Cast of ranks: " + "  ".join(rank_parts)
-	if run.has_upgrade("peek_stock") and not board.stock.is_empty():
-		var peek: Array[String] = []
-		for i in range(maxi(0, board.stock.size() - 3), board.stock.size()):
-			peek.append((board.stock[i] as CardData).label())
-		peek.reverse()
-		_peek_label.text = "Sleight-of-hand peek (top of stock first): %s" % ", ".join(peek)
-	else:
-		_peek_label.text = ""
+	var live: Array = run.living_seats()
+	if live.size() < 2:
+		_show_run_over()
+		return
+	game.setup(live, run.rng, run.packed_level(), run.favorite_rank, run.extra_cards())
+	_message("Round %d. Stake %d. %s leads." % [run.round_n, run.stake(), RunManager.NAMES[game.current_player]])
+	_refresh()
+	_continue_turns()
 
-func _message(text: String) -> void:
-	_message_label.text = text
-# ---------------------------------------------------------------- rendering
-
-func _refresh() -> void:
-	_apply_responsive_layout()
-	for child in _top_row.get_children():
-		_top_row.remove_child(child)
-		child.queue_free()
-	for child in _tableau_row.get_children():
-		_tableau_row.remove_child(child)
-		child.queue_free()
-
-	# Stock
-	var stock_view: CardView
-	if board.stock.is_empty():
-		stock_view = CardView.new(null, _card_size)
-		stock_view.placeholder_text = "REDEAL\n(%d)" % board.redeals_left if board.redeals_left > 0 else "EMPTY"
-	else:
-		# Show a face-down card as the stock back (its identity stays hidden).
-		stock_view = CardView.new(CardData.new(1, 0, false), _card_size)
-	stock_view.set_meta("action", "stock")
-	stock_view.clicked.connect(_on_stock_clicked)
-	_top_row.add_child(stock_view)
-
-	# Waste (top card only is playable)
-	var waste_view: CardView
-	if board.waste.is_empty():
-		waste_view = CardView.new(null, _card_size)
-		waste_view.placeholder_text = "WASTE"
-	else:
-		waste_view = CardView.new(board.waste[board.waste.size() - 1], _card_size)
-	if not board.waste.is_empty():
-		waste_view.rank_level = run.rank_level((board.waste[board.waste.size() - 1] as CardData).rank)
-	waste_view.set_meta("source", {"type": "waste"})
-	waste_view.clicked.connect(_on_card_clicked)
-	waste_view.double_clicked.connect(_on_card_double_clicked)
-	_top_row.add_child(waste_view)
-
-	var spacer: Control = Control.new()
-	spacer.custom_minimum_size = Vector2(_gap * 1.5, 10)
-	_top_row.add_child(spacer)
-
-	# Foundations
-	for suit in range(4):
-		var pile: Array = board.foundation_pile(suit)
-		var fv: CardView
-		if pile.is_empty():
-			fv = CardView.new(null, _card_size)
-			fv.placeholder_suit = suit
+func _continue_turns() -> void:
+	if game.round_over:
+		_end_round()
+		return
+	if game.must_pass_seat == game.current_player:
+		if game.lead:
+			game.must_pass_seat = -1
 		else:
-			fv = CardView.new(pile[pile.size() - 1], _card_size)
-			if _selection.get("type", "") == "foundation" and int(_selection.get("suit", -1)) == suit:
-				fv.selected = true
-		if not pile.is_empty():
-			fv.rank_level = run.rank_level((pile[pile.size() - 1] as CardData).rank)
-		fv.set_meta("source", {"type": "foundation", "suit": suit})
-		fv.set_meta("dest", {"type": "foundation", "suit": suit})
-		fv.clicked.connect(_on_card_clicked)
-		fv.double_clicked.connect(_on_card_double_clicked)
-		_top_row.add_child(fv)
-
-	# Tableau
-	for i in range(board.tableau.size()):
-		var pile2: Array = board.tableau[i]
-		var col: Control = Control.new()
-		col.custom_minimum_size = Vector2(_card_size.x, _card_size.y + _overlap * float(maxi(0, pile2.size() - 1)))
-		_tableau_row.add_child(col)
-		if pile2.is_empty():
-			var empty: CardView = CardView.new(null, _card_size)
-			empty.placeholder_text = "DROP"
-			empty.set_meta("dest", {"type": "tableau", "index": i})
-			empty.clicked.connect(_on_card_clicked)
-			col.add_child(empty)
-			continue
-		for k in range(pile2.size()):
-			var cv: CardView = CardView.new(pile2[k], _card_size)
-			cv.position = Vector2(0, _overlap * float(k))
-			cv.rank_level = run.rank_level((pile2[k] as CardData).rank)
-			cv.set_meta("source", {"type": "tableau", "index": i, "start": k})
-			cv.set_meta("dest", {"type": "tableau", "index": i})
-			if _selection.get("type", "") == "tableau" and int(_selection.get("index", -1)) == i and int(_selection.get("start", -1)) == k:
-				cv.selected = true
-			cv.clicked.connect(_on_card_clicked)
-			cv.double_clicked.connect(_on_card_double_clicked)
-			col.add_child(cv)
-	_refresh_header()
-
-# ---------------------------------------------------------------- input
-
-func _on_stock_clicked(_view: CardView) -> void:
-	if not run.round_active:
-		return
-	_selection = {}
-	if not board.stock.is_empty():
-		board.draw_stock()
-		run.score_for_event("draw")
-		_message("Drew %s." % (board.waste[board.waste.size() - 1] as CardData).display_name())
-	elif board.recycle_waste():
-		_message("Recycled the waste (%d redeals left)." % board.redeals_left)
-	else:
-		_message("Stock is empty and no redeals remain.")
-	_refresh()
-	_check_end_conditions()
-
-func _on_card_clicked(view: CardView) -> void:
-	if not run.round_active:
-		return
-	# Destination click while something is selected?
-	if not _selection.is_empty() and view.has_meta("dest"):
-		var dest: Dictionary = view.get_meta("dest")
-		# Clicking the selected card itself deselects.
-		if view.has_meta("source"):
-			var src2: Dictionary = view.get_meta("source")
-			if str(src2.get("type", "")) == str(_selection.get("type", "")) \
-					and int(src2.get("index", -9)) == int(_selection.get("index", -8)) \
-					and int(src2.get("start", -9)) == int(_selection.get("start", -8)) \
-					and int(src2.get("suit", -9)) == int(_selection.get("suit", -8)):
-				_selection = {}
-				_refresh()
-				return
-		if _try_move_selection_to(dest):
+			var who: int = game.current_player
+			game.pass_turn(who)
+			_message("%s is filibustered and passes." % RunManager.NAMES[who])
+			_refresh()
+			_continue_turns()
 			return
-		# Fall through: maybe they meant to select this card instead.
-	if view.has_meta("source"):
-		var src: Dictionary = view.get_meta("source")
-		var moving: Array = board._peek_source(src)
-		if moving.is_empty():
-			_selection = {}
-			_message("Nothing playable there.")
-		else:
-			_selection = src
-			_message("Selected %s. Click a destination pile." % (moving[0] as CardData).display_name())
-	else:
-		_selection = {}
-	_refresh()
-
-func _on_card_double_clicked(view: CardView) -> void:
-	if not run.round_active or not view.has_meta("source"):
-		return
-	var src: Dictionary = view.get_meta("source")
-	var result: Dictionary = board.try_auto_foundation(src)
-	if bool(result.get("ok", false)):
-		_selection = {}
-		_apply_move_scoring(result, src)
-		if _score_msg == "":
-			_message("Sent %s to its finale pile." % (result["card"] as CardData).display_name())
-		else:
-			_message(_score_msg)
+	if game.current_player == 0:
+		_busy = false
 		_refresh()
-		_check_end_conditions()
-	else:
-		_message("That card cannot take its finale bow yet.")
-
-func _try_move_selection_to(dest: Dictionary) -> bool:
-	var src: Dictionary = _selection
-	var result: Dictionary = board.try_move(src, dest)
-	if not bool(result.get("ok", false)):
-		_message("Illegal move.")
-		return false
-	_selection = {}
-	_apply_move_scoring(result, src)
-	_message(_score_msg if _score_msg != "" else "Moved %s." % (result["card"] as CardData).display_name())
+		_message("Your turn. Tap equal ranks, then Play — or Pass.")
+		return
+	_busy = true
 	_refresh()
-	_check_end_conditions()
-	return true
+	_ai_timer.start()
 
-func _apply_move_scoring(result: Dictionary, src: Dictionary) -> void:
-	_score_msg = ""
-	if bool(result.get("to_foundation", false)):
-		var pts: int = run.score_for_event("foundation", result["card"])
-		var b: Dictionary = run.last_breakdown
-		_score_msg = "Finale +%d applause (applause %d + encore %d, Flair x%.2f)." % [pts, int(b.get("base_chips", 0)) + int(b.get("enh_chips", 0)), int(b.get("combo_bonus", 0)), float(b.get("mult_used", 1.0))]
-		if bool(b.get("broke", false)) and int(b.get("broken_chain", 0)) >= 2:
-			_score_msg = "ENCORE DROPPED (was x%d)! " % int(b.get("broken_chain", 0)) + _score_msg
-		elif bool(b.get("used_grace", false)):
-			_score_msg += " The Safety Line saved the encore!"
-		if bool(b.get("lucky_proc", false)):
-			_score_msg += " A RABBIT FROM THE HAT!"
-		_message(_score_msg)
-	elif str(src.get("type", "")) == "foundation":
-		run.score_for_event("foundation_to_tableau")
-	elif str(src.get("type", "")) == "waste":
-		run.score_for_event("waste_to_tableau")
+func _ai_act() -> void:
+	if game.round_over or game.current_player == 0:
+		_continue_turns()
+		return
+	var seat: int = game.current_player
+	var persona: int = (seat % 3)
+	var choice: Dictionary = PresidentAI.choose(game, seat, persona)
+	if bool(choice.get("pass", false)):
+		game.pass_turn(seat)
+		_message("%s passes." % RunManager.NAMES[seat])
 	else:
-		run.score_for_event("tableau_move")
-	if bool(result.get("flipped", false)):
-		var fpts: int = run.score_for_event("flip")
-		_score_msg += " Reveal +%d applause." % fpts
-		_message("Revealed a hidden card! +%d applause." % fpts)
+		var r: Dictionary = game.play(seat, choice["combo"])
+		if bool(r.get("ok", false)):
+			_message("%s plays %s." % [RunManager.NAMES[seat], str(r.get("label", ""))])
+		else:
+			game.pass_turn(seat)
+			_message("%s passes." % RunManager.NAMES[seat])
+	_refresh()
+	_continue_turns()
 
-# ---------------------------------------------------------------- flow
-
-func _check_end_conditions() -> void:
-	if not run.round_active:
+func _on_play() -> void:
+	if _busy or game.current_player != 0 or game.round_over:
 		return
-	if board.is_cleared():
-		var bonus: int = run.board_clear_bonus()
-		_message("A flawless finale - board cleared! Bonus applause +%d." % bonus)
-		_win_round(true)
+	if _selected.is_empty():
+		_message("Select cards of one rank first.")
 		return
-	if run.score >= run.target:
-		_message("The crowd is roaring! Press 'Take a Bow' to end the trick in triumph, or keep playing for more applause.")
-		# Auto-prompt is friendlier for a prototype: treat meeting target as a win
-		# only via the button, so players can push their luck. Nothing to do here.
-	if not board.has_any_legal_move():
-		run.fail_run()
-		_show_overlay("THE TRICK FALLS FLAT...", "No legal moves remain in Act %d.\nFinal applause this trick: %d / %d target.\nHighest deck rank: %s. The crowd shuffles out..." % [run.ante, run.score, run.target, RankSystem.full_name(run.max_rank)], ["New Run"])
-
-func _on_cash_out() -> void:
-	if run.round_active and run.score >= run.target:
-		_win_round(false)
-
-func _win_round(cleared: bool) -> void:
-	run.round_active = false
-	if run.ante >= run.max_ante and not run.endless:
-		run.run_won.emit()
-		_show_overlay("THE CROWD GOES WILD!", "A standing ovation! You performed all %d acts! Final deck: A-%s.\nPress Endless to keep the show going, or start a New Run." % [run.max_ante, RankSystem.full_name(run.max_rank)], ["Endless Mode", "New Run"])
+	var rank: int = (_selected[0] as CardData).rank
+	var combo: Dictionary = {"rank": rank, "count": _selected.size()}
+	var r: Dictionary = game.play(0, combo)
+	if not bool(r.get("ok", false)):
+		_message("Illegal play (%s)." % str(r.get("reason", "")))
 		return
-	var choices: Array = UpgradeDB.build_shop_choices(run.max_rank, run.owned_upgrades, 3, run.rng, RunManager.PROTOTYPE_MAX_RANK)
-	var ctx: String = "Act %d trick complete%s! Applause: %d / %d." % [run.ante, " (a flawless finale - board cleared!)" if cleared else "", run.score, run.target]
-	_shop.present(choices, ctx)
+	_selected.clear()
+	_message("You play %s." % str(r.get("label", "")))
+	_refresh()
+	_continue_turns()
+
+func _on_pass() -> void:
+	if _busy or game.current_player != 0 or game.round_over:
+		return
+	if game.lead:
+		_message("You have the lead — play something.")
+		return
+	game.pass_turn(0)
+	_selected.clear()
+	_message("You pass.")
+	_refresh()
+	_continue_turns()
+
+func _on_card_press(view: CardView, _pos: Vector2) -> void:
+	if _busy or game.current_player != 0 or view.card == null:
+		return
+	var card: CardData = view.card
+	if _selected.has(card):
+		_selected.erase(card)
+	else:
+		if not _selected.is_empty() and (_selected[0] as CardData).rank != card.rank:
+			_selected.clear()
+		_selected.append(card)
 	_refresh()
 
-func _on_shop_choice(choice: Dictionary) -> void:
-	var result_text: String = run.apply_shop_choice(choice)
-	_on_shop_done()
-	_message("%s Act %d. Applause target %d." % [result_text, run.ante, run.target])
+func _use_action(id: String) -> void:
+	if _busy or game.current_player != 0 or game.round_over:
+		_message("Actions are for your turn.")
+		return
+	if not run.spend_action(id):
+		return
+	match id:
+		"veto":
+			game.skip_seat = _next_opponent()
+			_message("Veto — %s will be skipped." % RunManager.NAMES[game.skip_seat])
+		"filibuster":
+			game.must_pass_seat = _next_opponent()
+			_message("Filibuster — %s must pass." % RunManager.NAMES[game.must_pass_seat])
+		"exec":
+			game.exec_order = true
+			_message("Executive Order — any rank of the required count.")
+		"leak":
+			game.peek_seat = _next_opponent()
+			_message("Leak — peeking %s." % RunManager.NAMES[game.peek_seat])
+		"tax":
+			_tax()
+		"rally":
+			_rally()
+	_refresh()
 
-func _on_shop_done() -> void:
-	run.ante += 1
-	run.start_round()
+func _next_opponent() -> int:
+	var remain: Array = game.active_seats()
+	var idx: int = remain.find(0)
+	if idx < 0:
+		return int(remain[0]) if not remain.is_empty() else 1
+	return int(remain[(idx + 1) % remain.size()])
+
+func _tax() -> void:
+	var last: int = -1
+	var worst_n: int = -1
+	for s in game.active_seats():
+		if s == 0:
+			continue
+		var n: int = game.hand_of(s).size()
+		if n >= worst_n:
+			worst_n = n
+			last = s
+	if last < 0 or game.hand_of(last).is_empty():
+		_message("Tax fizzled — nobody to steal from.")
+		run.actions.append("tax")
+		return
+	var oh: Array = game.hands[last]
+	var card: CardData = oh[run.rng.randi_range(0, oh.size() - 1)]
+	oh.erase(card)
+	game.hands[0].append(card)
+	Deck._sort_hand(game.hands[0])
+	_message("Taxed %s for %s." % [RunManager.NAMES[last], card.display_name()])
+
+func _rally() -> void:
+	for _i in range(2):
+		if not game.kitty.is_empty():
+			game.hands[0].append(game.kitty.pop_back())
+		else:
+			game.hands[0].append(CardData.new(3, _i % 4, true))
+	Deck._sort_hand(game.hands[0])
+	_message("Rally — two more cards.")
+
+func _end_round() -> void:
+	_busy = true
+	run.apply_payouts(game.finished)
+	var lines: Array[String] = []
+	for p in run.last_payout:
+		var d: Dictionary = p
+		lines.append("%d. %s  HP %+d%s" % [int(d["place"]), str(d["name"]), int(d["hp_delta"]), "  +$%d" % int(d["gold"]) if int(d["seat"]) == 0 else ""])
+	var ctx: String = "Round %d results (stake %d):\n%s\nYou: HP %d/%d   Gold %d" % [
+		run.round_n, run.stake(), "\n".join(lines), int(run.hp[0]), run.max_hp, run.gold]
+	if run.run_over:
+		_show_run_over()
+		return
+	_shop_upgrades = UpgradeDB.shop_offers(run.rng, 3)
+	_shop_actions = ActionDB.shop_offers(run.rng, 3)
+	_shop.present(run.gold, _shop_upgrades, _shop_actions, ctx)
+
+func _on_buy_upgrade(item: Dictionary) -> void:
+	if run.buy_upgrade(str(item["id"]), int(item["price"])):
+		_shop.set_gold(run.gold)
+		_message("Bought %s." % str(item["name"]))
+		_shop.present(run.gold, _shop_upgrades, _shop_actions, "Gold: %d" % run.gold)
+	else:
+		_message("Not enough gold.")
+
+func _on_buy_action(item: Dictionary) -> void:
+	if run.buy_action(str(item["id"]), int(item["price"])):
+		_shop.set_gold(run.gold)
+		_message("Pocketed %s." % str(item["name"]))
+		_shop.present(run.gold, _shop_upgrades, _shop_actions, "Gold: %d" % run.gold)
+	else:
+		_message("Not enough gold.")
+
+func _on_shop_closed() -> void:
+	run.next_round()
 	_start_round()
-	_message("Act %d begins. Applause target %d. Deck: A-%s (%d cards)." % [run.ante, run.target, RankSystem.full_name(run.max_rank), board.total_cards()])
 
-func _on_hint() -> void:
-	if board.has_any_legal_move():
-		_message("Hint: a legal move exists. Check waste/tableau tops against the finale piles (Ace first) and descending alternating colours.")
-	else:
-		_message("Hint: no legal moves remain.")
+func _show_run_over() -> void:
+	var title: String = "THE OVAL IS YOURS" if run.run_won else "REMOVED FROM OFFICE"
+	var body: String = "You lasted %d round(s). Gold in pocket: %d.\n%s" % [
+		run.round_n, run.gold, "Last seat standing." if run.run_won else "HP hit zero. The cabinet outlasted you."]
+	_show_overlay(title, body, ["New Run"])
 
 func _show_overlay(title_text: String, body: String, actions: Array) -> void:
-	_overlay_body.custom_minimum_size = Vector2(minf(420.0, maxf(240.0, size.x - 72.0)), 0)
 	_overlay_title.text = title_text
 	_overlay_body.text = body
+	_overlay_body.custom_minimum_size = Vector2(minf(420.0, maxf(240.0, size.x - 48.0)), 0)
 	for child in _overlay_buttons.get_children():
 		_overlay_buttons.remove_child(child)
 		child.queue_free()
-	for action in actions:
+	for a in actions:
 		var b: Button = Button.new()
+		b.text = str(a)
 		b.custom_minimum_size = Vector2(0, 44)
-		b.text = str(action)
-		var captured: String = str(action)
-		b.pressed.connect(func() -> void: _on_overlay_action(captured))
+		b.pressed.connect(func() -> void:
+			_overlay.visible = false
+			run.start_new_run()
+			_start_round()
+		)
 		_overlay_buttons.add_child(b)
 	_overlay.visible = true
 
-func _on_overlay_action(action: String) -> void:
-	_overlay.visible = false
-	match action:
-		"New Run":
-			run.start_new_run()
-			_start_round()
-			_message("The curtain rises on a new show! Deck: A-%s." % RankSystem.full_name(run.max_rank))
-		"Endless Mode":
-			run.endless = true
-			run.ante += 1
-			run.start_round()
-			_start_round()
-			_message("Endless encores: Act %d." % run.ante)
+func _message(t: String) -> void:
+	_msg.text = t
+
+func _refresh_hud() -> void:
+	if _hud == null:
+		return
+	_hud.text = "Round %d  Stake %d  HP %d/%d  Gold %d  Living %d" % [
+		run.round_n, run.stake(), int(run.hp[0]), run.max_hp, run.gold, run.living_seats().size()]
+
+func _refresh() -> void:
+	_refresh_hud()
+	var vw: float = size.x if size.x > 10.0 else 390.0
+	var nhand: int = maxi(1, game.hand_of(0).size())
+	var w: float = clampf(floorf((vw - 20.0) / float(mini(nhand, 10))), 36.0, 70.0)
+	_card_size = Vector2(w, w * 1.4)
+	_rebuild_ais()
+	_rebuild_trick()
+	_rebuild_hand()
+	_rebuild_actions()
+	var yours: bool = game.current_player == 0 and not game.round_over and not _busy
+	_play_btn.disabled = not yours
+	_pass_btn.disabled = not yours or game.lead
+
+func _rebuild_ais() -> void:
+	for c in _ai_row.get_children():
+		_ai_row.remove_child(c)
+		c.queue_free()
+	for seat in range(1, 6):
+		var box: VBoxContainer = VBoxContainer.new()
+		box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var bust: ColorRect = ColorRect.new()
+		bust.custom_minimum_size = Vector2(36, 28)
+		bust.color = AI_COLORS[seat - 1]
+		if not run.is_alive(seat):
+			bust.color = Color(0.2, 0.2, 0.22)
+		box.add_child(bust)
+		var nm: Label = Label.new()
+		nm.text = str(RunManager.NAMES[seat]).replace("The ", "")
+		nm.add_theme_font_size_override("font_size", 10)
+		nm.clip_text = true
+		box.add_child(nm)
+		var hp: Label = Label.new()
+		hp.add_theme_font_size_override("font_size", 10)
+		if run.is_alive(seat):
+			hp.text = "HP %d  %dc" % [int(run.hp[seat]), game.hand_of(seat).size()]
+		else:
+			hp.text = "OUT"
+		if game.current_player == seat:
+			hp.add_theme_color_override("font_color", Color(0.95, 0.82, 0.3))
+		box.add_child(hp)
+		var last: Label = Label.new()
+		last.add_theme_font_size_override("font_size", 10)
+		last.text = str(game.last_play_label.get(seat, "—"))
+		last.clip_text = true
+		box.add_child(last)
+		if game.peek_seat == seat:
+			var peek: Label = Label.new()
+			peek.add_theme_font_size_override("font_size", 9)
+			var bits: Array[String] = []
+			for c2 in game.hand_of(seat):
+				bits.append((c2 as CardData).label())
+			peek.text = " ".join(bits)
+			peek.autowrap_mode = TextServer.AUTOWRAP_OFF
+			peek.clip_text = true
+			box.add_child(peek)
+		if run.has_upgrade("whip") and not run.whip_used:
+			var wb: Button = Button.new()
+			wb.text = "?"
+			wb.custom_minimum_size = Vector2(28, 28)
+			var cap: int = seat
+			wb.pressed.connect(func() -> void: _whip(cap))
+			box.add_child(wb)
+		_ai_row.add_child(box)
+
+func _whip(seat: int) -> void:
+	if run.whip_used:
+		return
+	run.whip_used = true
+	var legal: Array = game.legal_combos(seat)
+	_message("Whip Count: %s %s follow." % [RunManager.NAMES[seat], "CAN" if not legal.is_empty() else "cannot"])
+	_refresh()
+
+func _rebuild_trick() -> void:
+	for c in _trick_cards.get_children():
+		_trick_cards.remove_child(c)
+		c.queue_free()
+	if game.lead or game.trick_count <= 0:
+		_trick_label.text = "Lead anything."
+		return
+	_trick_label.text = "Follow %d× %s (or pass)" % [game.trick_count, RankSystem.short_label(game.trick_rank)]
+	for i in range(game.trick_count):
+		var cv: CardView = CardView.new(CardData.new(game.trick_rank, i % 4, true), _card_size)
+		cv.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_trick_cards.add_child(cv)
+
+func _rebuild_hand() -> void:
+	for c in _hand_row.get_children():
+		_hand_row.remove_child(c)
+		c.queue_free()
+	var hand: Array = game.hand_of(0)
+	var n: int = hand.size()
+	var gap: float = 4.0
+	var total: float = float(n) * _card_size.x + float(maxi(0, n - 1)) * gap
+	var start: float = maxf(0.0, (_hand_row.size.x - total) * 0.5)
+	if _hand_row.size.x < 10.0:
+		start = 0.0
+	for i in range(n):
+		var cv: CardView = CardView.new(hand[i], _card_size)
+		cv.position = Vector2(start + float(i) * (_card_size.x + gap), 0)
+		cv.selected = _selected.has(hand[i])
+		cv.press_started.connect(_on_card_press)
+		_hand_row.add_child(cv)
+	_hand_row.custom_minimum_size = Vector2(0, _card_size.y + 8)
+
+func _rebuild_actions() -> void:
+	for c in _action_row.get_children():
+		_action_row.remove_child(c)
+		c.queue_free()
+	if run.actions.is_empty():
+		return
+	for id in run.actions:
+		var info: Dictionary = ActionDB.get_by_id(str(id))
+		var b: Button = Button.new()
+		b.text = str(info.get("name", id))
+		b.custom_minimum_size = Vector2(0, 36)
+		var cap: String = str(id)
+		b.pressed.connect(func() -> void: _use_action(cap))
+		_action_row.add_child(b)

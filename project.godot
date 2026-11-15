@@ -10,8 +10,8 @@ config_version=5
 
 [application]
 
-config/name="Abracadabra! Solitaire Roguelike"
-config/description="A stage-magic Balatro-like roguelike built on Klondike solitaire. Perform tricks in acts, earn applause and Flair, collect props, and escalate past Kings to Emperors and Deities."
+config/name="President"
+config/description="President vs five AIs. Survive on 50 HP, earn catch-up gold from bad finishes, and buy deck upgrades and action cards at the desk."
 run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.3", "GL Compatibility")
 config/icon="res://icon.svg"
