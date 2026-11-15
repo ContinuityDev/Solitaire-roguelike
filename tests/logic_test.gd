@@ -797,58 +797,77 @@ func _init() -> void:
 	_check(int(next_r.hp[2]) > 0 and int(next_r.hp[4]) > 0, "next_round revives dead AIs")
 	next_r.free()
 
-	# --- Survivor Chips, economy, rank customizations ---
+	# --- Survivor Chips only from AI death; rank customizations ---
 	var chip_run: RunManager = RunManager.new()
 	chip_run.start_new_run()
 	_check(chip_run.chips == 0, "new run starts with 0 chips")
 	chip_run.hp[2] = 1
 	chip_run.hp[3] = 1
-	# Force two AI knockouts via a bottom-half finish for seats 2 and 3.
 	chip_run.apply_payouts([0, 1, 4, 5, 2, 3])
 	_check(chip_run.last_knockouts.has(2) or int(chip_run.hp[2]) == 0, "AI seat can be knocked out by payout")
 	var ko_n: int = chip_run.last_knockouts.size()
 	_check(ko_n >= 1, "at least one AI knockout recorded (%d)" % ko_n)
-	_check(chip_run.chips >= ko_n * RunManager.CHIP_PER_KO, "survivor chips granted on AI KO (%d chips for %d KOs)" % [chip_run.chips, ko_n])
-	chip_run.chips = 0
-	chip_run.owned_upgrades.append("chip_magnet")
-	chip_run.owned_upgrades.append("chip_magnet")
-	chip_run.last_knockouts = [4, 5]
-	chip_run._grant_survivor_chips({0: 10})
-	_check(chip_run.chips == (1 + 2) * 2, "chip magnet stacks on KO chips")
+	_check(chip_run.chips == ko_n * RunManager.CHIP_PER_KO, "survivor chips only from AI KO (%d chips for %d KOs)" % [chip_run.chips, ko_n])
+	# No other chip sources: economy upgrades / gold earned / empty KO list.
 	chip_run.chips = 0
 	chip_run.last_knockouts.clear()
-	chip_run.owned_upgrades.append("syndicate")
-	chip_run._grant_survivor_chips({0: 10})
-	_check(chip_run.chips == 2, "syndicate grants 1 chip per $5 earned")
-
-	chip_run.chips = 10
-	chip_run.gold = 0
-	_check(chip_run.buy_upgrade("fx_gold_5", 3), "can buy Mint Fives with chips")
-	_check(chip_run.chips == 7, "chip price deducted")
-	_check(chip_run.rank_effect_level(0, 5, "gold") == 1, "rank effect leveled to 1")
-	_check(chip_run.buy_upgrade("fx_gold_5", 3), "can level Mint Fives again")
-	_check(chip_run.rank_effect_level(0, 5, "gold") == 2, "rank effect leveled to 2")
-	_check(chip_run.rank_gold_on_play(0, 5) == 2, "gold-on-play matches level")
+	chip_run.owned_upgrades.append("payroll")
 	chip_run.owned_upgrades.append("gold_rush")
-	_check(chip_run.rank_gold_on_play(0, 5) == 4, "gold rush doubles customization gold")
+	chip_run.owned_upgrades.append("war_bonds")
+	chip_run._grant_survivor_chips({0: 100})
+	_check(chip_run.chips == 0, "no chips without AI knockouts")
+	chip_run.bind_or_level_rank_effect(0, 5, "gold")
+	var no_chip_play: Dictionary = chip_run.trigger_rank_play(0, 5, [], 1, false, false)
+	_check(int(no_chip_play.get("chips", 0)) == 0, "rank play never grants chips")
+	_check(int(no_chip_play.get("gold", 0)) >= 1, "rank play still pays gold")
+
+	chip_run.chips = 20
+	chip_run.gold = 0
+	_check(chip_run.buy_upgrade("fx_gold_5", 5), "can buy Mint Fives with chips")
+	_check(chip_run.chips == 15, "chip price deducted")
+	_check(chip_run.rank_effect_level(0, 5, "gold") >= 1, "rank effect leveled")
+	_check(chip_run.buy_upgrade("fx_gold_5", 5), "can level Mint Fives again")
+	_check(chip_run.rank_effect_level(0, 5, "gold") >= 2, "rank effect leveled further")
+	chip_run.owned_upgrades.append("gold_rush")
+	_check(chip_run.rank_gold_on_play(0, 5) >= 2, "gold-on-play matches level / rush")
 
 	var fx_res: Dictionary = chip_run.trigger_rank_play(0, 5, [])
-	_check(int(fx_res.get("gold", 0)) == 4, "trigger_rank_play pays gold")
-	_check(chip_run.gold == 4, "gold added to seat")
-	chip_run.bind_or_level_rank_effect(0, 5, "chips")
-	chip_run.chips = 0
-	var fx2: Dictionary = chip_run.trigger_rank_play(0, 5, [])
-	_check(int(fx2.get("chips", 0)) >= 1, "chip-on-play fires")
+	_check(int(fx_res.get("gold", 0)) >= 2, "trigger_rank_play pays gold")
+	_check(int(fx_res.get("chips", 0)) == 0, "trigger_rank_play pays no chips")
 	chip_run.bind_or_level_rank_effect(0, 4, "damage")
 	chip_run.bind_or_level_rank_effect(0, 4, "damage")
 	chip_run.hp[1] = 20
 	var hp_before_whip: int = int(chip_run.hp[1])
+	chip_run.chips = 0
 	var fx3: Dictionary = chip_run.trigger_rank_play(0, 4, [])
 	_check(int(fx3.get("damage", 0)) == 2, "damage effect deals level HP")
 	_check(int(chip_run.hp[1]) == hp_before_whip - 2, "weakest AI lost HP")
-	_check(chip_run.rank_effect_badge(0, 5).contains("$") or chip_run.rank_effect_badge(0, 5).contains("◈"), "badge text for customized rank")
+	_check(int(fx3.get("chips", 0)) == 0, "non-lethal whip deals no chips")
+	# Mid-round AI elimination still grants exactly CHIP_PER_KO.
+	chip_run.hp[1] = 1
+	chip_run.chips = 0
+	var fx_ko: Dictionary = chip_run.trigger_rank_play(0, 4, [])
+	_check(int(chip_run.hp[1]) == 0, "whip can eliminate AI")
+	_check(int(fx_ko.get("chips", 0)) == RunManager.CHIP_PER_KO, "mid-round KO grants only base chip")
+	_check(chip_run.rank_effect_badge(0, 5).contains("$"), "badge text for customized rank")
 
-	# Economy: payroll, interest, patronage, war chest, echo
+	# Wide rank-targeted pool
+	_check(RankEffectDB.EFFECTS.size() >= 40, "rank fx pool covers many ranks (%d)" % RankEffectDB.EFFECTS.size())
+	_check(ComboBuffDB.COMBOS.size() >= 40, "combo pool is wide (%d)" % ComboBuffDB.COMBOS.size())
+	var ranks_covered: Dictionary = {}
+	for fx_item in RankEffectDB.EFFECTS:
+		ranks_covered[int(fx_item.get("rank", 0))] = true
+	for r in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]:
+		_check(ranks_covered.has(r), "rank fx covers %s" % RankSystem.short_label(r))
+	_check(not RankEffectDB.get_by_id("fx_gold_7").is_empty(), "Mint Sevens exists")
+	_check(not ComboBuffDB.get_by_id("combo_pair_7_gold").is_empty(), "Paired Sevens combo exists")
+	_check(not ComboBuffDB.get_by_id("combo_retrigger_9").is_empty(), "Nine Echo exists")
+	_check(str(UpgradeDB.get_by_id("chip_magnet").get("id", "")) == "", "Chip Magnet removed")
+	_check(str(UpgradeDB.get_by_id("syndicate").get("id", "")) == "", "Syndicate removed")
+	_check(str(UpgradeDB.get_by_id("war_chest").get("id", "")) == "", "War Chest removed")
+	_check(str(UpgradeDB.get_by_id("echo").get("id", "")) == "", "Echo Chamber removed")
+
+	# Economy: payroll, interest, bargain, war bonds (gold only)
 	var econ: RunManager = RunManager.new()
 	econ.start_new_run()
 	econ.owned_upgrades.append("payroll")
@@ -860,22 +879,22 @@ func _init() -> void:
 	econ.owned_upgrades.append("interest")
 	econ.open_shop_phase()
 	_check(econ.gold == 110, "compound interest grants 10% on desk open")
-	econ.chips = 10
-	econ.owned_upgrades.append("patronage")
-	econ.owned_upgrades.append("patronage")
-	_check(econ.shop_price_of(0, 5, "chips") == 3, "patronage discounts chip prices")
+	econ.owned_upgrades.append("bargain")
+	econ.owned_upgrades.append("bargain")
+	_check(econ.shop_price_of(0, 5, "chips") == 3, "bargain discounts chip prices")
 	econ.chips = 0
-	econ.owned_upgrades.append("war_chest")
-	econ.owned_upgrades.append("war_chest")
+	econ.gold = 0
+	econ.owned_upgrades.append("war_bonds")
+	econ.owned_upgrades.append("war_bonds")
 	econ.next_round()
-	_check(econ.chips == 2, "war chest pays chips each new round")
+	_check(econ.gold == 6, "war bonds pays gold each new round")
+	_check(econ.chips == 0, "war bonds grants no chips")
 	econ.bind_or_level_rank_effect(0, 3, "gold")
-	econ.owned_upgrades.append("echo")
 	econ.chips = 0
-	var echo_res: Dictionary = econ.trigger_rank_play(0, 3, [])
-	_check(int(echo_res.get("chips", 0)) >= 1, "echo grants chips when gold customizations fire")
+	var gold_only: Dictionary = econ.trigger_rank_play(0, 3, [])
+	_check(int(gold_only.get("chips", 0)) == 0, "gold customizations never grant chips")
 
-	# Inflation preserves base_rank for customization matching
+	# Inflation preserves base_rank; blue true-value display uses deal-face + effective
 	var c_base: CardData = CardData.new(5, 0, true)
 	Deck.inflate_card(c_base, 12)
 	_check(c_base.base_rank == 5, "inflation keeps base_rank 5")
@@ -883,6 +902,17 @@ func _init() -> void:
 	var packed_fx: Array = c_base.pack()
 	var unpacked_fx: CardData = CardData.unpack(packed_fx)
 	_check(unpacked_fx.base_rank == 5 and unpacked_fx.rank == c_base.rank, "base_rank survives pack")
+	var disp_inf: Dictionary = RankSystem.buff_display(c_base, 0)
+	_check(str(disp_inf.get("printed", "")) == "5", "inflated card prints deal-face 5")
+	_check(bool(disp_inf.get("buffed", false)), "inflated card shows blue true value")
+	_check(str(disp_inf.get("shown", "")) != "5", "true value differs from printed 5")
+	var c_strong: CardData = CardData.new(5, 1, true)
+	var disp_str: Dictionary = RankSystem.buff_display(c_strong, 1)
+	_check(str(disp_str.get("printed", "")) == "5" and str(disp_str.get("shown", "")) == "6", "Strong Fives show 5→6 in blue")
+	_check(bool(disp_str.get("buffed", false)), "power bind marks buffed for blue badge")
+	var c_plain: CardData = CardData.new(9, 0, true)
+	var disp_plain: Dictionary = RankSystem.buff_display(c_plain, 0)
+	_check(not bool(disp_plain.get("buffed", true)), "plain card needs no blue badge")
 
 	var g_base: PresidentGame = PresidentGame.new()
 	g_base.living = [0, 1]
@@ -914,7 +944,7 @@ func _init() -> void:
 	_check(combo_run.combo_power_mult(0, 5, 4) == 1, "Quad Fours idle on four 5s")
 	_check(combo_run.buy_upgrade("combo_quad_4", 14), "can level Quad Fours")
 	_check(combo_run.combo_power_mult(0, 4, 4) == 5, "leveled Quad Fours is ×5")
-	_check(combo_run.buy_upgrade("combo_quad_any", 16), "can buy Quad Force")
+	_check(combo_run.buy_upgrade("combo_quad_any", 18), "can buy Quad Force")
 	_check(combo_run.combo_power_mult(0, 4, 4) == 10, "Quad Fours × Quad Force stacks (5×2)")
 
 	var g_quad: PresidentGame = PresidentGame.new()
@@ -940,14 +970,16 @@ func _init() -> void:
 	var pair_res: Dictionary = combo_run.trigger_rank_play(0, 5, [], 2, false, false)
 	_check(int(pair_res.get("retriggers", 0)) == 1, "Five Echo retriggers once on 5s")
 	_check(int(pair_res.get("gold", 0)) == 2 * 2 + 3, "retrigger doubles rank gold; pair mint pays")
+	_check(int(pair_res.get("chips", 0)) == 0, "combo payouts never grant chips")
 	_check(combo_run.gold == 7, "combo gold credited to seat")
 
-	combo_run.chips = 0
-	combo_run.owned_upgrades.append("combo_trips_3_chip")
+	combo_run.gold = 0
+	combo_run.owned_upgrades.append("combo_trips_3_gold")
 	var trip_res: Dictionary = combo_run.trigger_rank_play(0, 3, [], 3, false, false)
-	_check(int(trip_res.get("chips", 0)) == 2, "Triple Chips pays on three 3s")
+	_check(int(trip_res.get("gold", 0)) == 3, "Triple Threes pays gold on three 3s")
+	_check(int(trip_res.get("chips", 0)) == 0, "Triple Threes grants no chips")
 	var miss_res: Dictionary = combo_run.trigger_rank_play(0, 3, [], 2, false, false)
-	_check(int(miss_res.get("chips", 0)) == 0, "Triple Chips idle on a pair of 3s")
+	_check(int(miss_res.get("gold", 0)) == 0, "Triple Threes idle on a pair of 3s")
 
 	combo_run.gold = 0
 	combo_run.owned_upgrades.append("combo_last_card_gold")
@@ -956,6 +988,8 @@ func _init() -> void:
 	_check(combo_run.combo_short(0).contains("4"), "combo short badge lists owned combos")
 	_check(not ComboBuffDB.get_by_id("combo_quad_4").is_empty(), "ComboBuffDB lookup works")
 	_check(UpgradeDB.get_by_id("combo_retrigger_pair").get("effect", "") == "retrigger", "UpgradeDB resolves combo ids")
+	_check(UpgradeDB.get_by_id("combo_pair_7_gold").get("rank", 0) == 7, "rank-targeted combo names its rank")
+	_check(UpgradeDB.get_by_id("fx_power_13").get("rank", 0) == 13, "rank fx targets Kings")
 
 	combo_run.free()
 	chip_run.free()

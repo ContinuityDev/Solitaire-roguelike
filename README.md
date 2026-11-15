@@ -37,25 +37,24 @@ The **odds line** under the trick is Hayden’s view of the rest of the table: u
 
 Everyone starts at **50 HP**. You do **not** die after round 1. **Every seat earns gold** — AIs shop and spend it.
 
-**Survivor Chips (◈)** are a second wallet for humans only. Whenever an AI hits 0 HP (end-of-round payout or mid-round whip damage), each living human gains chips (`1 + Chip Magnet stacks` per KO). Spend chips at the desk on **rank customizations** and chip-priced economy upgrades. Gold still buys the classic desk row.
+**Survivor Chips (◈)** are scarce. The **only** way to gain them is when an AI is **eliminated** (end-of-round KO or mid-round lethal whip) — flat `1` chip per living human per KO. No economy upgrade, rank bind, or combo grants chips. Spend chips on **rank customizations** and chip-priced combos; gold buys everything else.
 
-### Economy / synergy (first-pass)
-| Id | Currency | Effect |
-|---|---|---|
-| Payroll | gold | +2 gold on every place payout (stacks) |
-| Compound Interest | gold | Desk open: gain 10% gold (+5%/extra stack) |
-| Chip Magnet | gold | +1◈ per AI knockout (stacks) |
-| Gold Rush | gold | Rank-customization gold ×(1+stacks) |
-| War Chest | chips | +1◈ at the start of each round (stacks) |
-| Syndicate | chips | At payout, +1◈ per $5 you earned (stacks) |
-| Patronage | chips | Rank-fx chip prices −1 (stacks, min 1) |
-| Echo Chamber | chips | When a customized rank pays gold, also +1◈/stack |
+Cards show the **deal-face** in suit color and the **true follow value in blue** whenever it differs (inflation, Incumbent, Strong Fives → 6) — hand, pile, and fly-ins.
+
+### Economy / synergy (gold)
+| Id | Effect |
+|---|---|
+| Payroll | +2 gold on every place payout (stacks) |
+| Compound Interest | Desk open: gain 10% gold (+5%/extra stack) |
+| Gold Rush | Rank-customization gold ×(1+stacks) |
+| Bargain Desk | Chip-priced offers −1 (stacks, min 1) |
+| War Bonds | +3 gold at the start of each round (stacks) |
 
 ### Rank customizations
-Chip offers bind an effect to a **deal-face** (3…K, A, 2). Inflation / Incumbent change the printed number, but the customization still fires. Effects (level by rebuying): **gold**, **chips**, **power**, **damage** (weakest AI), **heal**, **always legal**, **buff hand** (promote lowest). Teal ribbon on the card shows the active effects.
+Wide chip catalog covering **every classic rank** (3…K, A, 2). Effects bind to a **deal-face**; inflation / Incumbent still fire. Effects (level by rebuying): **gold**, **power**, **damage**, **heal**, **always legal**, **buff hand**. Teal ribbon; prices are deliberately high.
 
 ### Combo buffs
-Desk **COMBO** offers (gold or ◈) attach a **condition** (rank, play shape single/pair/trips/quad, lead, emptying hand) to an **effect** (multiply follow power, gold, chips, or **retrigger** rank buffs). Examples: **Quad Fours** (four 4s → follow power ×4), **Five Echo** (playing 5s retriggers their rank buffs), **Paired Mint** (pair of 5s → gold), **Exit Bonus** (emptying your hand → gold). Rebuy to level; matching mults stack by multiplying. HUD bind string and desk rows show owned combos.
+Large **COMBO** pool — almost every entry names a rank and play shape (pair/trips/quad/lead/last). Effects: multiply follow power, gold, or **retrigger** rank buffs. Desk UI sections: Gold / Rank ◈ / Combos.
 
 | Place | Gold | HP |
 |---|---|---|
@@ -70,7 +69,7 @@ Desk **COMBO** offers (gold or ◈) attach a **condition** (rank, play shape sin
 
 ## The desk (shop)
 
-After every round, spend gold. The Desk shows **4 random offers** (a mix of upgrades, rank binds, actions, and enhancements) — not the whole catalog. **Reroll** redraws the stock for `$2 + $2 × rerolls this visit` (Lobbyist still discounts). Maxed copies do not restock.
+After every round, spend gold (and scarce ◈). The Desk shows **6 random offers** in clear sections (gold upgrades, rank ◈, combos, actions/enhancements) — not the whole catalog. Unaffordable tiles grey out. **Reroll** redraws the stock for `$2 + $2 × rerolls this visit` (Lobbyist still discounts gold). Maxed copies do not restock.
 
 **Upgrades (keep):** Packed Briefcase **$12**, Favorite rank (2s **$16** / Aces **$14** / Kings **$12**), Deep Pockets **$14**, Incumbent **$10** (promote your lowest card one rank after each deal), Whip Count **$8**, Lobbyist **$18**, Populist Wave **$11**, Oval Office **$15**, Majority Whip **$10**, Safe Seat **$16**.
 

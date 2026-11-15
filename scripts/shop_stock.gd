@@ -1,10 +1,10 @@
 class_name ShopStock
 extends RefCounted
 
-## Limited desk stock. 4 offers per visit, mixed kinds, no maxed reprints.
-## Mixes gold upgrades/actions/enhancements with chip-priced economy + rank fx.
+## Limited desk stock. 6 offers per visit, mixed kinds, no maxed reprints.
+## Mixes gold upgrades/actions/enhancements with scarce chip rank fx + combos.
 
-const SLOTS: int = 4
+const SLOTS: int = 6
 const REROLL_BASE: int = 2
 const REROLL_STEP: int = 2
 const AI_SLOTS: int = 2
@@ -54,9 +54,9 @@ static func max_owned(item: Dictionary) -> int:
 		return 2
 	if id == "packed" or id == "incumbent" or id == "pockets" or id == "lobbyist":
 		return 3
-	if id == "payroll" or id == "interest" or id == "chip_magnet" or id == "war_chest" or id == "syndicate" or id == "patronage" or id == "echo":
+	if id == "payroll" or id == "interest" or id == "war_bonds":
 		return 3
-	if id == "gold_rush":
+	if id == "gold_rush" or id == "bargain":
 		return 2
 	return 1
 

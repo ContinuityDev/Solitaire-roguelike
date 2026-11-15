@@ -135,8 +135,10 @@ func _draw() -> void:
 	elif face_lab.length() > 1:
 		rank_size = maxi(14, int(18.0 * s))
 	draw_string(font, Vector2(inner.position.x + 3, inner.position.y + 18.0 * s), face_lab, HORIZONTAL_ALIGNMENT_LEFT, -1, rank_size, suit_col)
-	if value_buffed and shown_value != "" and shown_value != face_lab:
-		if size.x >= 50.0:
+	# True follow value always in blue when it differs from the printed deal-face
+	# (inflation, Incumbent, Strong Fives → 6, etc.).
+	if shown_value != "" and (value_buffed or shown_value != face_lab):
+		if size.x >= 50.0 and shown_value != face_lab:
 			var arrow_size: int = maxi(11, int(14.0 * s))
 			var face_w: float = font.get_string_size(face_lab, HORIZONTAL_ALIGNMENT_LEFT, -1, rank_size).x
 			var arrow_col: Color = BUFF_BLUE

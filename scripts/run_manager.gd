@@ -17,8 +17,9 @@ const STREAK_UNIT: int = 3 # bonus gold = STREAK_UNIT * (streak - 1)
 const BEST_PATH: String = "user://president_best.cfg"
 ## Dead AI seats return with this much HP (scaled up by stake) so the table
 ## never collapses into a last-seat "win".
-const AI_REVIVE_BASE: int = 20
-## Base Survivor Chips granted to each living human per AI knockout.
+const AI_REVIVE_BASE: int = 28
+## Survivor Chips granted to each living human per AI knockout.
+## Chips are scarce — this is the only source (no economy / play grants).
 const CHIP_PER_KO: int = 1
 
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -344,7 +345,7 @@ func has_enhancement(id: String) -> bool:
 
 func shop_price_of(seat: int, base: int, currency: String = "gold") -> int:
 	if currency == "chips":
-		return maxi(1, base - count_upgrade_of(seat, "patronage"))
+		return maxi(1, base - count_upgrade_of(seat, "bargain"))
 	return maxi(1, base - 2 * count_upgrade_of(seat, "lobbyist"))
 
 func shop_price(base: int, currency: String = "gold") -> int:
@@ -593,24 +594,21 @@ func apply_payouts(finish_order: Array) -> void:
 	_check_end()
 	changed.emit()
 
-func _grant_survivor_chips(gold_earned: Dictionary) -> void:
+func _grant_survivor_chips(_gold_earned: Dictionary = {}) -> void:
+	## Chips only from AI eliminations — flat CHIP_PER_KO each, no multipliers.
+	if last_knockouts.is_empty():
+		return
 	for human in living_humans():
 		var h: int = int(human)
-		var chip_gain: int = 0
-		if not last_knockouts.is_empty():
-			var per: int = CHIP_PER_KO + count_upgrade_of(h, "chip_magnet")
-			chip_gain += per * last_knockouts.size()
-		var syn: int = count_upgrade_of(h, "syndicate")
-		if syn > 0:
-			var earned: int = int(gold_earned.get(h, 0))
-			chip_gain += syn * int(earned / 5)
-		if chip_gain > 0:
-			add_chips(h, chip_gain)
-			log_event("%s banks %d Survivor Chip(s)." % [name_of(h), chip_gain])
-			for row in last_payout:
-				if int(row.get("seat", -1)) == h:
-					row["chips"] = int(row.get("chips", 0)) + chip_gain
-					break
+		var chip_gain: int = CHIP_PER_KO * last_knockouts.size()
+		if chip_gain <= 0:
+			continue
+		add_chips(h, chip_gain)
+		log_event("%s banks %d Survivor Chip(s) (AI down)." % [name_of(h), chip_gain])
+		for row in last_payout:
+			if int(row.get("seat", -1)) == h:
+				row["chips"] = int(row.get("chips", 0)) + chip_gain
+				break
 
 ## Owned combo buffs for a seat (leveled by repurchase). One entry per id.
 func combo_buffs_of(seat: int) -> Array:
@@ -684,16 +682,6 @@ func _apply_rank_bind_pulse(seat: int, base_rank: int, hand: Array, out: Diction
 		add_gold(seat, gold_n)
 		out["gold"] = int(out["gold"]) + gold_n
 		(out["logs"] as Array).append("%s earns $%d on %s." % [name_of(seat), gold_n, RankSystem.short_label(base_rank)])
-		var echo_n: int = count_upgrade_of(seat, "echo")
-		if echo_n > 0:
-			add_chips(seat, echo_n)
-			out["chips"] = int(out["chips"]) + echo_n
-			(out["logs"] as Array).append("%s Echo: +%d◈." % [name_of(seat), echo_n])
-	var chip_n: int = rank_chips_on_play(seat, base_rank)
-	if chip_n > 0:
-		add_chips(seat, chip_n)
-		out["chips"] = int(out["chips"]) + chip_n
-		(out["logs"] as Array).append("%s earns %d◈ on %s." % [name_of(seat), chip_n, RankSystem.short_label(base_rank)])
 	var dmg: int = rank_effect_level(seat, base_rank, "damage")
 	if dmg > 0:
 		var target: int = _weakest_living_ai(seat)
@@ -703,11 +691,11 @@ func _apply_rank_bind_pulse(seat: int, base_rank: int, hand: Array, out: Diction
 			out["target"] = target
 			(out["logs"] as Array).append("%s whips %s for %d HP." % [name_of(seat), name_of(target), dmg])
 			if int(hp[target]) <= 0 and is_ai(target):
-				var ko_chips: int = CHIP_PER_KO + count_upgrade_of(seat, "chip_magnet")
-				if is_human(seat) and ko_chips > 0:
-					add_chips(seat, ko_chips)
-					out["chips"] = int(out["chips"]) + ko_chips
-					(out["logs"] as Array).append("%s Survivor Chip(s) +%d (mid-round KO)." % [name_of(seat), ko_chips])
+				# Mid-round elimination still grants the scarce KO chip (humans only).
+				if is_human(seat) and CHIP_PER_KO > 0:
+					add_chips(seat, CHIP_PER_KO)
+					out["chips"] = int(out["chips"]) + CHIP_PER_KO
+					(out["logs"] as Array).append("%s Survivor Chip +%d (AI eliminated)." % [name_of(seat), CHIP_PER_KO])
 	var heal_n: int = rank_effect_level(seat, base_rank, "heal")
 	if heal_n > 0 and is_alive(seat):
 		var before: int = int(hp[seat])
@@ -725,21 +713,16 @@ func _apply_rank_bind_pulse(seat: int, base_rank: int, hand: Array, out: Diction
 func _apply_combo_payouts(seat: int, base_rank: int, count: int, is_lead: bool, last_card: bool, out: Dictionary) -> void:
 	for buff in combo_buffs_of(seat):
 		var eff: String = str(buff.get("effect", ""))
-		if eff != "gold" and eff != "chips":
+		if eff != "gold":
 			continue
 		if not ComboBuffDB.matches(buff, base_rank, count, is_lead, last_card):
 			continue
 		var amt: int = int(buff.get("amount", 1)) * int(buff.get("level", 1))
 		if amt <= 0:
 			continue
-		if eff == "gold":
-			add_gold(seat, amt)
-			out["gold"] = int(out["gold"]) + amt
-			(out["logs"] as Array).append("%s combo %s: +$%d." % [name_of(seat), str(buff.get("name", "")), amt])
-		else:
-			add_chips(seat, amt)
-			out["chips"] = int(out["chips"]) + amt
-			(out["logs"] as Array).append("%s combo %s: +%d◈." % [name_of(seat), str(buff.get("name", "")), amt])
+		add_gold(seat, amt)
+		out["gold"] = int(out["gold"]) + amt
+		(out["logs"] as Array).append("%s combo %s: +$%d." % [name_of(seat), str(buff.get("name", "")), amt])
 
 func _weakest_living_ai(except_seat: int = -1) -> int:
 	var best: int = -1
@@ -767,10 +750,10 @@ func _check_end() -> void:
 	run_won = false
 
 ## Bring every dead AI seat back so the cabinet always fills the table.
-## Late antes revive tankier so knockouts (and chips) slow while stake keeps rising.
+## Revive tanky early so AI deaths (and chips) stay rare and valuable.
 func revive_cabinet() -> void:
 	_ensure_seat_arrays()
-	var revive_hp: int = mini(START_HP, maxi(AI_REVIVE_BASE, stake() + 5 + ante() * 2))
+	var revive_hp: int = mini(START_HP, maxi(AI_REVIVE_BASE + 8, stake() + 12 + ante() * 4))
 	for seat in range(seat_count):
 		if is_human(seat):
 			continue
@@ -922,17 +905,18 @@ func next_round() -> void:
 	whip_used = false
 	close_shop_phase()
 	revive_cabinet()
-	_grant_war_chest()
+	_grant_war_bonds()
 	changed.emit()
 
-func _grant_war_chest() -> void:
+func _grant_war_bonds() -> void:
 	for seat in range(seat_count):
 		if not is_alive(seat):
 			continue
-		var n: int = count_upgrade_of(seat, "war_chest")
+		var n: int = count_upgrade_of(seat, "war_bonds")
 		if n > 0:
-			add_chips(seat, n)
-			log_event("%s War Chest: +%d◈." % [name_of(seat), n])
+			var gold_n: int = 3 * n
+			add_gold(seat, gold_n)
+			log_event("%s War Bonds: +$%d." % [name_of(seat), gold_n])
 
 func open_shop_phase() -> Array:
 	shop_phase = true

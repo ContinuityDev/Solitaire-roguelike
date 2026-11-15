@@ -94,22 +94,23 @@ static func short_label_for_power(p: int) -> String:
 
 ## Face vs effective follow value. `power_bonus` is the seat-scoped +power bind
 ## (Strong Fives, Ace Authority, …). Promotions/Forge keep `origin_rank`.
-## `{printed, shown, buffed}` — `printed` is the source rank (always drawn in
-## suit color); `shown` is the true follow value (blue badge when buffed).
+## `{printed, shown, buffed}` — `printed` is the deal-face / origin (suit color);
+## `shown` is the true follow value (always drawn in blue when it differs).
 static func buff_display(card: CardData, power_bonus: int = 0) -> Dictionary:
 	if card == null:
 		return {"shown": "", "printed": "", "small": "", "buffed": false, "power": 0}
 	var face: int = card.rank
 	var origin: int = card.origin_rank if card.origin_rank > 0 else face
+	var base: int = card.base_rank if card.base_rank > 0 else origin
 	var power: int = president_power(face) + maxi(0, power_bonus)
-	# Super faces use the numeric label; classic "2+" is only for a buffed bomb
-	# (power 16 from Heavier Bombs), not for an inflated rank-16 card.
 	var shown: String = _shown_for(face, power)
-	var face_lab: String = short_label(face)
-	var origin_lab: String = short_label(origin)
-	var buffed: bool = power > president_power(origin)
-	var printed: String = origin_lab if origin != face else face_lab
-	var small: String = printed if buffed and printed != shown else ""
+	# Deal-face when available so inflated/upgraded cards still show their root.
+	var printed: String = short_label(base)
+	# If promote changed origin away from base without inflation, prefer origin.
+	if origin > 0 and origin != face and origin != base and not is_super(face):
+		printed = short_label(origin)
+	var buffed: bool = shown != printed
+	var small: String = printed if buffed else ""
 	return {"shown": shown, "printed": printed, "small": small, "buffed": buffed, "power": power}
 
 static func _shown_for(face: int, power: int) -> String:
