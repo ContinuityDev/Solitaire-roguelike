@@ -18,6 +18,16 @@ const UPGRADES: Array = [
 		"desc": "Start each round with one extra card from the kitty."},
 	{"id": "whip", "name": "Whip Count", "icon": "?", "price": 6,
 		"desc": "Once per round, see whether an AI can follow the trick."},
+	{"id": "lobbyist", "name": "Lobbyist", "icon": "-$", "price": 15,
+		"desc": "Desk prices −2 gold (stacks)."},
+	{"id": "populist", "name": "Populist Wave", "icon": "HP+", "price": 9,
+		"desc": "If you were Asshole last round, heal 8 at the next deal."},
+	{"id": "oval", "name": "Oval Office", "icon": "OO", "price": 13,
+		"desc": "As President, incoming tribute is +1 card."},
+	{"id": "majority", "name": "Majority Whip", "icon": "MW", "price": 8,
+		"desc": "Whip Count is available every look, not once."},
+	{"id": "safe_seat", "name": "Safe Seat", "icon": "5", "price": 14,
+		"desc": "Your HP cannot fall below 5 while you still have any."},
 ]
 
 static func get_by_id(id: String) -> Dictionary:

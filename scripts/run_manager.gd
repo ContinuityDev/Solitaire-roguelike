@@ -20,8 +20,14 @@ var owned_upgrades: Array = []
 var actions: Array = [] # action ids in inventory
 var favorite_rank: int = 0
 var whip_used: bool = false
-var last_payout: Array = [] # [{seat, place, gold, hp_delta}]
+var last_payout: Array = [] # [{seat, place, gold, hp_delta, name, role}]
 var last_first: int = 0 # previous round's President; leads the next deal
+var last_finish: Array = [] # finish order; roles/trades read from living seats
+var owned_enhancements: Array = []
+var cancelled_tribute_seats: Array = [] # givers who JSN/pardon
+var skip_tributes: bool = false
+var trade_log: Array = []
+var last_role: String = "" # your role last round, for Populist
 var run_over: bool = false
 var run_won: bool = false
 
@@ -41,6 +47,12 @@ func start_new_run() -> void:
 	whip_used = false
 	last_payout.clear()
 	last_first = 0
+	last_finish.clear()
+	owned_enhancements.clear()
+	cancelled_tribute_seats.clear()
+	skip_tributes = false
+	trade_log.clear()
+	last_role = ""
 	run_over = false
 	run_won = false
 	changed.emit()
@@ -72,19 +84,82 @@ func packed_level() -> int:
 	return count_upgrade("packed")
 
 func extra_cards() -> int:
-	return count_upgrade("incumbent")
+	return count_upgrade("incumbent") + count_enhancement("lucky")
+
+func count_enhancement(id: String) -> int:
+	var n: int = 0
+	for u in owned_enhancements:
+		if str(u) == id:
+			n += 1
+	return n
+
+func has_enhancement(id: String) -> bool:
+	return count_enhancement(id) > 0
+
+func shop_price(base: int) -> int:
+	return maxi(1, base - 2 * count_upgrade("lobbyist"))
+
+func owned_counts() -> Dictionary:
+	var out: Dictionary = {}
+	for u in owned_upgrades:
+		out[str(u)] = int(out.get(str(u), 0)) + 1
+	for e in owned_enhancements:
+		out[str(e)] = int(out.get(str(e), 0)) + 1
+	for a in actions:
+		out[str(a)] = int(out.get(str(a), 0)) + 1
+	return out
+
+func living_finish() -> Array:
+	var out: Array = []
+	for s in last_finish:
+		if is_alive(int(s)):
+			out.append(int(s))
+	return out
+
+func priced_copy(item: Dictionary) -> Dictionary:
+	var d: Dictionary = item.duplicate()
+	d["price"] = shop_price(int(d.get("price", 0)))
+	return d
+
+func has_action(id: String) -> bool:
+	return actions.has(id)
+
+func consume_jsn(seat: int) -> bool:
+	if seat != 0:
+		return false
+	return spend_action("just_say_no")
+
+func cancel_hostile(target: int, action_id: String) -> bool:
+	if target != 0 or not ActionDB.is_hostile(action_id):
+		return false
+	return consume_jsn(0)
+
+func result_action_ids() -> Array:
+	var out: Array = []
+	for id in actions:
+		var info: Dictionary = ActionDB.get_by_id(str(id))
+		if str(info.get("when", "turn")) == "results" or str(id) == "just_say_no":
+			if not out.has(id):
+				out.append(id)
+	return out
 
 ## Place array is seats in finish order (1st ... last).
 func apply_payouts(finish_order: Array) -> void:
 	last_payout.clear()
-	if not finish_order.is_empty():
-		last_first = int(finish_order[0])
-	var n: int = finish_order.size()
+	last_finish = []
+	for s0 in finish_order:
+		last_finish.append(int(s0))
+	if not last_finish.is_empty():
+		last_first = int(last_finish[0])
+	var n: int = last_finish.size()
 	if n == 0:
 		return
+	var roles: Dictionary = RoleTrade.roles_map(last_finish)
+	if roles.has(0):
+		last_role = str(roles[0]["role"])
 	var s: int = stake()
 	for i in range(n):
-		var seat: int = int(finish_order[i])
+		var seat: int = int(last_finish[i])
 		var place: int = i + 1
 		var gold_gain: int = 0
 		var hp_delta: int = 0
@@ -109,9 +184,14 @@ func apply_payouts(finish_order: Array) -> void:
 			else:
 				hp_delta = -s if place == n else -int(ceil(float(s) / 2.0))
 		if seat == 0:
+			if has_enhancement("gilded") and place <= 2:
+				gold_gain += 2 * count_enhancement("gilded")
 			gold += gold_gain
 		hp[seat] = clampi(int(hp[seat]) + hp_delta, 0, max_hp if seat == 0 else START_HP)
-		last_payout.append({"seat": seat, "place": place, "gold": gold_gain if seat == 0 else 0, "hp_delta": hp_delta, "name": NAMES[seat]})
+		if seat == 0 and has_upgrade("safe_seat") and int(hp[0]) > 0:
+			hp[0] = maxi(int(hp[0]), 5)
+		var role: String = str(roles.get(seat, {}).get("role", RoleTrade.ROLE_NEUTRAL))
+		last_payout.append({"seat": seat, "place": place, "gold": gold_gain if seat == 0 else 0, "hp_delta": hp_delta, "name": NAMES[seat], "role": role})
 	# Human Deep Pockets only raises human max; AIs stay 50.
 	_check_end()
 	changed.emit()
@@ -149,6 +229,14 @@ func buy_action(id: String, price: int) -> bool:
 	changed.emit()
 	return true
 
+func buy_enhancement(id: String, price: int) -> bool:
+	if gold < price:
+		return false
+	gold -= price
+	owned_enhancements.append(id)
+	changed.emit()
+	return true
+
 func spend_action(id: String) -> bool:
 	var i: int = actions.find(id)
 	if i < 0:
@@ -175,3 +263,13 @@ func next_round() -> void:
 	round_n += 1
 	whip_used = false
 	changed.emit()
+
+func reset_tribute_flags() -> void:
+	cancelled_tribute_seats.clear()
+	skip_tributes = false
+	trade_log.clear()
+
+func apply_populist() -> void:
+	if has_upgrade("populist") and last_role == RoleTrade.ROLE_SCUM and int(hp[0]) > 0:
+		hp[0] = mini(int(hp[0]) + 8 * count_upgrade("populist"), max_hp)
+		changed.emit()

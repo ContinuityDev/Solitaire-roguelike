@@ -106,6 +106,8 @@ func _draw() -> void:
 		var ribbon: Rect2 = Rect2(rect.position.x, rect.end.y - 16.0 * s, rect.size.x, 14.0 * s)
 		draw_rect(ribbon, Color(0.72, 0.10, 0.12, 0.92), true)
 		draw_string(font, Vector2(ribbon.position.x, ribbon.end.y - 3), "BOMB", HORIZONTAL_ALIGNMENT_CENTER, ribbon.size.x, int(10.0 * s), Color(1, 0.92, 0.55))
+	if card.enhancement == "steel":
+		draw_string(font, Vector2(rect.position.x + 2, rect.position.y + rect.size.y * 0.72), "STEEL", HORIZONTAL_ALIGNMENT_CENTER, rect.size.x - 4.0, int(9.0 * s), Color(0.55, 0.70, 0.95))
 
 func _draw_back(sb: StyleBoxFlat, rect: Rect2) -> void:
 	sb.bg_color = Color(0.10, 0.18, 0.36)

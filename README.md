@@ -10,7 +10,8 @@ Play in the browser once GitHub Pages is on: https://continuitydev.github.io/Sol
 - Play **N of a kind** (single, pair, trips, four). Follow with the same count, equal or higher rank. Pass if you cannot or will not.
 - When everyone else passes, the last player to play **leads** anything.
 - **You lead round 1.** Later rounds, last round’s 1st place leads if they are still living; otherwise you do.
-- First empty hand is 1st (President). Play continues until everyone is placed.
+- First empty hand is 1st (**President**). Play continues until everyone is placed: VP, Neutral, Vice-Asshole, **Asshole**.
+- After the next deal, classic **tribute**: Asshole gives their 2 highest cards to President, who returns any 2; Vice-Asshole gives 1 highest to VP, who returns 1. Dead seats skip. With 3 living only the 2-card trade runs; with 2, no trade.
 - 0 HP seats sit out the next deal.
 
 ### Your turn
@@ -35,9 +36,11 @@ Stake starts at 5 and climbs each round (`4 + round`). **Worse finish = more gol
 
 After every round, spend gold:
 
-**Upgrades (keep):** Packed Briefcase (more pairs), Favorite rank (2s / Aces / Kings), Deep Pockets (+10 max HP), Incumbent (+1 card from kitty), Whip Count (once per round: can that AI follow?).
+**Upgrades (keep):** Packed Briefcase, Favorite rank (2s / Aces / Kings), Deep Pockets, Incumbent, Whip Count, Lobbyist (cheaper desk), Populist Wave (heal if you were Asshole), Oval Office (+1 incoming tribute as President), Majority Whip, Safe Seat (HP floor 5).
 
-**Action cards (one-shot):** Veto (skip next opponent), Filibuster (they must pass), Executive Order (any rank of the required count), Leak (peek a hand), Tax (steal from the current last-place AI), Rally (draw 2).
+**Enhancements:** Steel Card (immune to tribute), Gilded Seal (+gold on a top finish), Union Deal (smaller tributes), Wax Seal (return 1 fewer), Lucky Draw.
+
+**Action cards (one-shot):** Veto, Filibuster, Executive Order, Leak, Tax, Rally, plus role cards — **Uprising** (swap President ↔ Asshole), **Just Say No** (cancel a tribute or a hostile action on you), Impeach, Pardon, Coup, Recess.
 
 ## AIs
 
