@@ -12,11 +12,15 @@ var rank: int = 1
 var suit: int = 0
 var face_up: bool = false
 var enhancement: String = "" # EnhancementDB id, "" = none
+## Printed rank when the card was dealt. Incumbent / Rally / Forge raise
+## `rank` in place and leave this so the face can show the buff in blue.
+var origin_rank: int = 1
 
 func _init(p_rank: int = 1, p_suit: int = 0, p_face_up: bool = false) -> void:
 	rank = p_rank
 	suit = p_suit
 	face_up = p_face_up
+	origin_rank = p_rank
 
 func is_red() -> bool:
 	return suit == 1 or suit == 2
@@ -31,7 +35,10 @@ func display_name() -> String:
 	return "%s of %s" % [RankSystem.full_name(rank), SUIT_NAMES[clampi(suit, 0, 3)]]
 
 func pack() -> Array:
-	return [rank, suit, enhancement]
+	var row: Array = [rank, suit, enhancement]
+	if origin_rank > 0 and origin_rank != rank:
+		row.append(origin_rank)
+	return row
 
 static func unpack(row) -> CardData:
 	var a: Array = row if row is Array else []
@@ -41,6 +48,8 @@ static func unpack(row) -> CardData:
 		true)
 	if a.size() > 2:
 		c.enhancement = str(a[2])
+	if a.size() > 3:
+		c.origin_rank = int(a[3])
 	return c
 
 static func pack_hand(cards: Array) -> Array:

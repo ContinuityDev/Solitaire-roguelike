@@ -310,6 +310,11 @@ func _local_seat() -> int:
 func _playing() -> bool:
 	return _table_layer != null and _table_layer.visible
 
+func _rank_power_bonus(seat: int, rank: int) -> int:
+	if run == null:
+		return 0
+	return run.rank_power_bonus(seat, rank)
+
 func _show_screen(which: String) -> void:
 	if _table_layer:
 		var on_table: bool = which == "table"
@@ -684,7 +689,7 @@ func _ai_act() -> void:
 		return
 	_award_rank_gold(seat, int(combo.get("rank", 0)))
 	_message("%s plays %s." % [run.name_of(seat), str(r.get("label", ""))])
-	await _fly_from(origins, combo)
+	await _fly_from(origins, combo, seat)
 	_refresh()
 	_lan_push()
 	_continue_turns()
@@ -717,7 +722,7 @@ func _on_play() -> void:
 	_award_rank_gold(_view_seat, rank)
 	_message("%s plays %s." % [run.name_of(_view_seat), str(r.get("label", ""))])
 	_busy = true
-	await _fly_from(origins, combo)
+	await _fly_from(origins, combo, _view_seat)
 	_refresh()
 	_lan_push()
 	_continue_turns()
@@ -819,14 +824,16 @@ func _seat_origins(seat: int, count: int) -> Array:
 func _trick_dest() -> Vector2:
 	return _trick_cards.global_position + Vector2(maxf(20.0, _trick_cards.size.x * 0.5 - 20.0), 10.0)
 
-func _fly_from(origins: Array, combo: Dictionary) -> void:
+func _fly_from(origins: Array, combo: Dictionary, seat: int = -1) -> void:
 	if origins.is_empty():
 		await get_tree().create_timer(0.12).timeout
 		return
 	var dest: Vector2 = _trick_dest()
 	var rank: int = int(combo.get("rank", 1))
+	var bonus: int = _rank_power_bonus(seat, rank) if seat >= 0 else 0
 	for i in range(origins.size()):
 		var ghost: CardView = CardView.new(CardData.new(rank, i % 4, true), _card_size)
+		ghost.set_card(ghost.card, bonus)
 		ghost.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_fly_layer.add_child(ghost)
 		ghost.global_position = origins[i]
@@ -1365,9 +1372,10 @@ func _sync_trick() -> void:
 	if row_w < 20.0:
 		row_w = maxf(80.0, size.x - 20.0)
 	var start: float = maxf(8.0, row_w * 0.5 - _card_size.x * 0.5)
+	var trick_bonus: int = _rank_power_bonus(game.trick_player, game.trick_rank) if game.trick_player >= 0 else 0
 	for i in range(_trick_views.size()):
 		var v: CardView = _trick_views[i]
-		v.set_card(CardData.new(game.trick_rank, i % 4, true))
+		v.set_card(CardData.new(game.trick_rank, i % 4, true), trick_bonus)
 		v.set_display_size(_card_size)
 		v.position = Vector2(start + float(i) * 10.0, 6.0 + float(i) * 5.0)
 		v.rotation = 0.05 * float(i - 1)
@@ -1397,8 +1405,7 @@ func _sync_hand() -> void:
 	for i in range(n):
 		var card: CardData = hand[i]
 		var cv2: CardView = _hand_views[i]
-		if cv2.card != card:
-			cv2.set_card(card)
+		cv2.set_card(card, _rank_power_bonus(_view_seat, card.rank))
 		cv2.set_display_size(_card_size)
 		cv2.selected = _trade_picks.has(card) if picking else _selected.has(card)
 		var legal: bool = yours and game.rank_is_legal(_view_seat, card.rank)
@@ -1631,7 +1638,7 @@ func _host_remote_play(seat: int, rank: int, count: int) -> void:
 	_message("%s plays %s." % [run.name_of(seat), str(r.get("label", ""))])
 	_lan_wait.clear()
 	_busy = true
-	await _fly_from(origins, combo)
+	await _fly_from(origins, combo, seat)
 	_refresh()
 	_lan_push()
 	_continue_turns()
