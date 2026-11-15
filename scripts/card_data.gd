@@ -22,7 +22,12 @@ func _init(p_rank: int = 1, p_suit: int = 0, p_face_up: bool = false) -> void:
 	face_up = p_face_up
 	origin_rank = p_rank
 
+func is_joker() -> bool:
+	return RankSystem.is_joker(rank)
+
 func is_red() -> bool:
+	if is_joker():
+		return suit == 1
 	return suit == 1 or suit == 2
 
 func suit_glyph() -> String:
@@ -32,6 +37,8 @@ func label() -> String:
 	return "%s%s" % [RankSystem.short_label(rank), SUIT_LETTERS[clampi(suit, 0, 3)]]
 
 func display_name() -> String:
+	if is_joker():
+		return "Red Joker" if is_red() else "Black Joker"
 	return "%s of %s" % [RankSystem.full_name(rank), SUIT_NAMES[clampi(suit, 0, 3)]]
 
 func pack() -> Array:

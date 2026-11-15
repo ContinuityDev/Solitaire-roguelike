@@ -145,6 +145,7 @@ func _build_ui() -> void:
 	_hand_row = Control.new()
 	_hand_row.custom_minimum_size = Vector2(0, 110)
 	_hand_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_hand_row.clip_contents = true
 	root.add_child(_hand_row)
 	_btn_row = HFlowContainer.new()
 	_btn_row.add_theme_constant_override("h_separation", 8)
@@ -619,7 +620,7 @@ func _continue_turns() -> void:
 		if game.lead:
 			_message("%s's lead. Yellow cards are playable — tap one, then Play (or double-tap)." % run.name_of(_view_seat))
 		else:
-			_message("%s's turn. Yellow cards beat %d× %s. Double-tap to play, or Pass." % [run.name_of(_view_seat), game.trick_count, RankSystem.short_label(game.trick_rank)])
+			_message("%s's turn. Yellow cards beat %d× %s. Double-tap to play, or Pass." % [run.name_of(_view_seat), game.trick_count, game.trick_follow_label()])
 		_lan_push()
 		return
 	_busy = true
@@ -772,7 +773,7 @@ func _on_card_double(view: CardView) -> void:
 func _select_from_card(card: CardData, for_play: bool) -> void:
 	var rank: int = card.rank
 	if not game.rank_is_legal(_view_seat, rank):
-		_message("That rank cannot follow %d× %s." % [game.trick_count, RankSystem.short_label(game.trick_rank)])
+		_message("That rank cannot follow %d× %s." % [game.trick_count, game.trick_follow_label()])
 		return
 	var of_rank: Array = []
 	for c in game.hand_of(_view_seat):
@@ -788,7 +789,7 @@ func _select_from_card(card: CardData, for_play: bool) -> void:
 		else:
 			_selected.append(card)
 	else:
-		var need: int = game.auto_select_count()
+		var need: int = game.auto_select_count_for(rank)
 		_selected.clear()
 		if of_rank.has(card):
 			_selected.append(card)
@@ -878,6 +879,51 @@ func _award_rank_gold(seat: int, rank: int) -> void:
 	run.add_gold(seat, n)
 	var who: String = run.name_of(seat)
 	run.log_event("%s earns $%d on %s." % [who, n, RankSystem.short_label(rank)])
+	_pop_gold(seat, n)
+
+func _pop_gold(seat: int, n: int) -> void:
+	var wrap: Control = Control.new()
+	wrap.custom_minimum_size = Vector2(78, 36)
+	wrap.size = Vector2(78, 36)
+	wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wrap.z_index = 50
+	var disc: Panel = Panel.new()
+	var sb: StyleBoxFlat = StyleBoxFlat.new()
+	sb.bg_color = Color(0.90, 0.68, 0.10)
+	sb.set_corner_radius_all(18)
+	sb.set_border_width_all(2)
+	sb.border_color = Color(1.0, 0.92, 0.45)
+	disc.add_theme_stylebox_override("panel", sb)
+	disc.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	disc.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wrap.add_child(disc)
+	var chip: Label = Label.new()
+	chip.text = "●  $+%d" % n
+	chip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	chip.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	chip.add_theme_font_size_override("font_size", 18)
+	chip.add_theme_color_override("font_color", Color(0.18, 0.10, 0.02))
+	chip.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wrap.add_child(chip)
+	_fly_layer.add_child(wrap)
+	var pos: Vector2 = _trick_dest()
+	if seat == _view_seat:
+		pos = _trick_dest() + Vector2(-20, -8)
+	else:
+		var pl: Control = _plaque_for(seat)
+		if pl != null:
+			pos = pl.global_position + Vector2(pl.size.x * 0.2, 4)
+	wrap.global_position = pos
+	wrap.scale = Vector2(0.45, 0.45)
+	var tw: Tween = create_tween()
+	tw.tween_property(wrap, "scale", Vector2(1.12, 1.12), 0.18).set_trans(Tween.TRANS_BACK)
+	tw.parallel().tween_property(wrap, "global_position", pos + Vector2(0, -48), 0.70).set_trans(Tween.TRANS_QUAD)
+	tw.tween_property(wrap, "modulate:a", 0.0, 0.28)
+	tw.tween_callback(func() -> void:
+		if is_instance_valid(wrap):
+			wrap.queue_free()
+	)
 
 func _fire_turn_action(seat: int, id: String) -> bool:
 	if not run.spend_action_for(seat, id):
@@ -914,7 +960,6 @@ func _end_round() -> void:
 	_busy = true
 	run.apply_payouts(game.finished)
 	run.ai_results_actions()
-	run.ai_shop_all()
 	_float_payouts()
 	_show_results()
 	_lan_push()
@@ -982,6 +1027,9 @@ func _on_buy_enhancement(item: Dictionary) -> void:
 		_message("Not enough gold.")
 
 func _open_shop() -> void:
+	var shop_logs: Array = run.open_shop_phase()
+	for line in shop_logs:
+		run.log_event(str(line))
 	_shop_queue = run.living_humans()
 	_advance_desk()
 
@@ -1244,8 +1292,7 @@ func _refresh() -> void:
 	_refresh_hud()
 	_update_banner()
 	var vw: float = size.x if size.x > 10.0 else 390.0
-	var nhand: int = maxi(1, game.hand_of(_view_seat).size())
-	var w: float = clampf(floorf((vw - 20.0) / float(mini(nhand, 10))), 36.0, 70.0)
+	var w: float = clampf(floorf((vw - 20.0) / 8.0), 36.0, 70.0)
 	_card_size = Vector2(w, w * 1.4)
 	_sync_ais()
 	_sync_trick()
@@ -1358,13 +1405,14 @@ func _sync_trick() -> void:
 			_trick_cards.remove_child(extra)
 			extra.queue_free()
 		return
-	_trick_label.text = "Follow %d× %s  —  or Pass" % [game.trick_count, RankSystem.short_label(game.trick_rank)]
+	_trick_label.text = "Follow %d× %s  —  or Pass" % [game.trick_count, game.trick_follow_label()]
 	while _trick_views.size() > game.trick_count:
 		var drop: Node = _trick_views.pop_back()
 		_trick_cards.remove_child(drop)
 		drop.queue_free()
 	while _trick_views.size() < game.trick_count:
-		var cv: CardView = CardView.new(CardData.new(game.trick_rank, _trick_views.size() % 4, true), _card_size)
+		var shown_rank: int = game.trick_printed if game.trick_printed != 0 else game.trick_rank
+		var cv: CardView = CardView.new(CardData.new(shown_rank, _trick_views.size() % 4, true), _card_size)
 		cv.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_trick_cards.add_child(cv)
 		_trick_views.append(cv)
@@ -1372,10 +1420,11 @@ func _sync_trick() -> void:
 	if row_w < 20.0:
 		row_w = maxf(80.0, size.x - 20.0)
 	var start: float = maxf(8.0, row_w * 0.5 - _card_size.x * 0.5)
-	var trick_bonus: int = _rank_power_bonus(game.trick_player, game.trick_rank) if game.trick_player >= 0 else 0
+	var shown_rank: int = game.trick_printed if game.trick_printed != 0 else game.trick_rank
+	var trick_bonus: int = _rank_power_bonus(game.trick_player, shown_rank) if game.trick_player >= 0 else 0
 	for i in range(_trick_views.size()):
 		var v: CardView = _trick_views[i]
-		v.set_card(CardData.new(game.trick_rank, i % 4, true), trick_bonus)
+		v.set_card(CardData.new(shown_rank, i % 4, true), trick_bonus)
 		v.set_display_size(_card_size)
 		v.position = Vector2(start + float(i) * 10.0, 6.0 + float(i) * 5.0)
 		v.rotation = 0.05 * float(i - 1)
@@ -1394,24 +1443,27 @@ func _sync_hand() -> void:
 		cv.double_pressed.connect(_on_card_double)
 		_hand_row.add_child(cv)
 		_hand_views.append(cv)
-	var gap: float = 4.0
-	var total: float = float(n) * _card_size.x + float(maxi(0, n - 1)) * gap
 	var row_w: float = _hand_row.size.x
 	if row_w < 20.0:
 		row_w = maxf(0.0, size.x - 20.0)
-	var start: float = maxf(0.0, (row_w - total) * 0.5)
+	var plan: Dictionary = HandLayout.plan(n, row_w, _card_size)
+	var cs: Vector2 = plan["size"]
+	var positions: Array = plan["positions"]
+	var lift_room: float = 16.0
 	var yours: bool = game.current_player == _view_seat and _is_human(_view_seat) and not _busy and not game.round_over
 	var picking: bool = _trade_waiting
 	for i in range(n):
 		var card: CardData = hand[i]
 		var cv2: CardView = _hand_views[i]
 		cv2.set_card(card, _rank_power_bonus(_view_seat, card.rank))
-		cv2.set_display_size(_card_size)
+		cv2.set_display_size(cs)
 		cv2.selected = _trade_picks.has(card) if picking else _selected.has(card)
 		var legal: bool = yours and game.rank_is_legal(_view_seat, card.rank)
 		cv2.highlighted = picking or (legal and not cv2.selected)
 		cv2.dimmed = yours and not legal and not picking
-		var dest: Vector2 = Vector2(start + float(i) * (_card_size.x + gap), -16.0 if cv2.selected else (-5.0 if cv2.highlighted else 0.0))
+		var base: Vector2 = positions[i] if i < positions.size() else Vector2.ZERO
+		var lift: float = 16.0 if cv2.selected else (5.0 if cv2.highlighted else 0.0)
+		var dest: Vector2 = Vector2(base.x, base.y + lift_room - lift)
 		if not _deal_anim:
 			cv2.position = dest
 		else:
@@ -1419,7 +1471,7 @@ func _sync_hand() -> void:
 			if cv2.modulate.a >= 0.99:
 				cv2.position = dest
 		cv2.queue_redraw()
-	_hand_row.custom_minimum_size = Vector2(0, _card_size.y + 16)
+	_hand_row.custom_minimum_size = Vector2(0, float(plan["height"]) + lift_room)
 
 func _rebuild_actions() -> void:
 	for c in _action_row.get_children():

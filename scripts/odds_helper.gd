@@ -15,7 +15,8 @@ static func played_of(game: PresidentGame, rank: int) -> int:
 
 static func unseen_of(game: PresidentGame, rank: int, viewer: int = 0) -> int:
 	var held: int = game.count_of_rank(viewer, rank)
-	return clampi(4 - held - played_of(game, rank), 0, 4)
+	var copies: int = RankSystem.copies_in_deck(rank)
+	return clampi(copies - held - played_of(game, rank), 0, copies)
 
 static func unseen_pool(game: PresidentGame, viewer: int = 0) -> int:
 	var n: int = game.kitty.size()
@@ -96,7 +97,7 @@ static func pass_bias(game: PresidentGame, seat: int, rank: int) -> float:
 		return 1.0
 	if game.lead or game.trick_count <= 0:
 		return 1.0
-	if RankSystem.president_power(rank) >= RankSystem.president_power(game.trick_rank):
+	if RankSystem.president_power(rank) >= game.trick_need_power():
 		return 0.22
 	return 1.0
 
@@ -144,7 +145,7 @@ static func hud_text(game: PresidentGame, run: RunManager, viewer: int = 0) -> S
 	var line1: String = "Odds  2s unseen %d (you %d)  ·  Aces %d (you %d)  ·  Kings %d (you %d)" % [
 		twos_u, you2, aces_u, youa, kings_u, youk]
 	if not game.lead and game.trick_count > 0:
-		line1 += "  ·  %s unseen %d" % [RankSystem.short_label(game.trick_rank), unseen_of(game, game.trick_rank, viewer)]
+		line1 += "  ·  %s unseen %d" % [game.trick_follow_label(), unseen_of(game, game.trick_printed if game.trick_printed > 0 else game.trick_rank, viewer)]
 	var bits: PackedStringArray = PackedStringArray()
 	var next_s: int = _next_living(game, viewer)
 	if next_s >= 0:
@@ -160,8 +161,9 @@ static func hud_text(game: PresidentGame, run: RunManager, viewer: int = 0) -> S
 		var style: String = _style_note(next_s)
 		bits.append("%s ~%s holds a 2%s" % [nm.replace("The ", ""), pct(p_follow), style])
 		if not game.lead:
-			var p_rank: float = p_seat_holds_rank(game, next_s, game.trick_rank, viewer)
-			bits.append("~%s holds a %s" % [pct(p_rank), RankSystem.short_label(game.trick_rank)])
+			var hold_rank: int = game.trick_printed if game.trick_printed > 0 else game.trick_rank
+			var p_rank: float = p_seat_holds_rank(game, next_s, hold_rank, viewer)
+			bits.append("~%s holds a %s" % [pct(p_rank), game.trick_follow_label()])
 	var pair_k: float = p_pair_unseen(game, 13, viewer)
 	bits.append("pair of Ks in an AI hand ~%s" % pct(pair_k))
 	if run != null:

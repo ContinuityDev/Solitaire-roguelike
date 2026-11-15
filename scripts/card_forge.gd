@@ -4,7 +4,7 @@ extends RefCounted
 ## In-place card transforms. Never grants extra shop items or extra cards.
 
 static func next_rank(rank: int) -> int:
-	if rank == 2 or rank == 1:
+	if RankSystem.is_joker(rank) or rank == 2 or rank == 1:
 		return rank
 	if rank == 13:
 		return 1
@@ -24,6 +24,8 @@ static func lowest_index(hand: Array, skip_bombs: bool = true) -> int:
 	var best_p: int = 99
 	for i in range(hand.size()):
 		var c: CardData = hand[i]
+		if RankSystem.is_joker(c.rank):
+			continue
 		if skip_bombs and c.rank == 2:
 			continue
 		var p: int = RankSystem.president_power(c.rank)
@@ -49,7 +51,7 @@ static func promote_lowest(hand: Array, n: int) -> PackedStringArray:
 			if used.has(i):
 				continue
 			var c: CardData = hand[i]
-			if c.rank == 2 or c.rank == 1:
+			if RankSystem.is_joker(c.rank) or c.rank == 2 or c.rank == 1:
 				continue
 			var p: int = RankSystem.president_power(c.rank)
 			if p < best_p:

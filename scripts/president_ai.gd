@@ -23,27 +23,37 @@ static func choose(game: PresidentGame, seat: int, personality: int = 1) -> Dict
 
 static func _choose_lead(legal: Array, personality: int) -> Dictionary:
 	for combo in legal:
-		if int(combo["rank"]) != 2:
+		var r: int = int(combo["rank"])
+		if not RankSystem.is_joker(r) and r != 2:
 			return {"pass": false, "combo": combo}
+	for combo2 in legal:
+		if not RankSystem.is_joker(int(combo2["rank"])):
+			return {"pass": false, "combo": combo2}
 	return {"pass": false, "combo": legal[0]}
 
 static func _choose_follow(legal: Array, personality: int, game: PresidentGame) -> Dictionary:
 	var non_bomb: Array = []
 	var bombs: Array = []
+	var jokers: Array = []
 	for combo in legal:
-		if int(combo["rank"]) == 2:
+		var r: int = int(combo["rank"])
+		if RankSystem.is_joker(r):
+			jokers.append(combo)
+		elif r == 2:
 			bombs.append(combo)
 		else:
 			non_bomb.append(combo)
 	if not non_bomb.is_empty():
 		return {"pass": false, "combo": non_bomb[0]}
-	if bombs.is_empty():
-		return {"pass": true}
 	var hand_n: int = game.hand_of(game.current_player).size()
-	if personality >= 2 or hand_n <= int(bombs[0]["count"]) + 1:
+	if not bombs.is_empty() and (personality >= 2 or hand_n <= int(bombs[0]["count"]) + 1):
 		return {"pass": false, "combo": bombs[0]}
-	if personality == 0:
-		return {"pass": true}
+	if not jokers.is_empty() and (personality >= 1 or hand_n <= 3 or bombs.is_empty()):
+		return {"pass": false, "combo": jokers[0]}
+	if not bombs.is_empty() and personality != 0:
+		return {"pass": false, "combo": bombs[0]}
+	if not jokers.is_empty():
+		return {"pass": false, "combo": jokers[0]}
 	return {"pass": true}
 
 ## After a round, if this seat holds a results-time action, pick one.
@@ -138,7 +148,7 @@ static func choose_turn_action(game: PresidentGame, run: RunManager, seat: int) 
 static func _has_promotable(game: PresidentGame, seat: int) -> bool:
 	for c in game.hand_of(seat):
 		var r: int = (c as CardData).rank
-		if r != 2 and r != 1:
+		if r != 2 and r != 1 and not RankSystem.is_joker(r):
 			return true
 	return false
 
