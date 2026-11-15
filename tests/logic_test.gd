@@ -36,6 +36,40 @@ func _init() -> void:
 	game.lead = true
 	_check(game.is_legal_combo({"rank": 3, "count": 3}), "any combo is legal on lead")
 
+	rng.seed = 1
+	var glead: PresidentGame = PresidentGame.new()
+	glead.setup([0, 1, 2, 3, 4, 5], rng, 0, 0, 0, 0)
+	_check(glead.current_player == 0, "fresh setup with lead_seat 0 starts on you")
+	_check(glead.lead, "a new round starts as a lead")
+
+	var run_lead: RunManager = RunManager.new()
+	run_lead.start_new_run()
+	_check(run_lead.lead_seat() == 0, "round 1 lead is you")
+	run_lead.round_n = 2
+	run_lead.last_first = 3
+	_check(run_lead.lead_seat() == 3, "later rounds the previous 1st leads")
+	run_lead.hp[3] = 0
+	_check(run_lead.lead_seat() == 0, "dead previous 1st falls back to you")
+
+	var gleg: PresidentGame = PresidentGame.new()
+	gleg.living = [0, 1]
+	gleg.hands = {
+		0: [CardData.new(7, 0, true), CardData.new(7, 1, true), CardData.new(4, 0, true)],
+		1: [CardData.new(8, 0, true)],
+	}
+	gleg.current_player = 0
+	gleg.lead = false
+	gleg.trick_rank = 6
+	gleg.trick_count = 2
+	_check(gleg.rank_is_legal(0, 7), "pair of 7s can follow pair of 6s")
+	_check(not gleg.rank_is_legal(0, 4), "single 4 cannot follow a pair")
+	_check(not gleg.is_legal_combo({"rank": 7, "count": 1}), "follow of the wrong count is illegal")
+	_check(gleg.auto_select_count() == 2, "auto-select count matches the trick")
+	gleg.lead = true
+	_check(gleg.rank_is_legal(0, 4), "any owned rank is legal on lead")
+	_check(gleg.auto_select_count() == 1, "auto-select is 1 on lead")
+	run_lead.free()
+
 	var g2: PresidentGame = PresidentGame.new()
 	g2.living = [0, 1]
 	g2.hands = {0: [CardData.new(4, 0, true)], 1: [CardData.new(5, 0, true), CardData.new(6, 0, true)]}

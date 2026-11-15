@@ -21,6 +21,7 @@ var actions: Array = [] # action ids in inventory
 var favorite_rank: int = 0
 var whip_used: bool = false
 var last_payout: Array = [] # [{seat, place, gold, hp_delta}]
+var last_first: int = 0 # previous round's President; leads the next deal
 var run_over: bool = false
 var run_won: bool = false
 
@@ -39,6 +40,7 @@ func start_new_run() -> void:
 	favorite_rank = 0
 	whip_used = false
 	last_payout.clear()
+	last_first = 0
 	run_over = false
 	run_won = false
 	changed.emit()
@@ -75,6 +77,8 @@ func extra_cards() -> int:
 ## Place array is seats in finish order (1st ... last).
 func apply_payouts(finish_order: Array) -> void:
 	last_payout.clear()
+	if not finish_order.is_empty():
+		last_first = int(finish_order[0])
 	var n: int = finish_order.size()
 	if n == 0:
 		return
@@ -152,6 +156,18 @@ func spend_action(id: String) -> bool:
 	actions.remove_at(i)
 	changed.emit()
 	return true
+
+func lead_seat() -> int:
+	if round_n <= 1:
+		return 0
+	if is_alive(last_first):
+		return last_first
+	if is_alive(0):
+		return 0
+	var live: Array = living_seats()
+	if live.is_empty():
+		return 0
+	return int(live[0])
 
 func next_round() -> void:
 	if run_over:
