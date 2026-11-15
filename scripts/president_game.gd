@@ -124,16 +124,24 @@ func combos_in_hand(seat: int) -> Array:
 			out.append({"rank": int(r), "count": k})
 	return out
 
+## Deal-face for customization matching (survives inflation / promote).
+func base_of_rank(seat: int, rank: int) -> int:
+	for c in hand_of(seat):
+		var card: CardData = c as CardData
+		if card.rank == rank:
+			return card.base_rank if card.base_rank > 0 else rank
+	return rank
+
 func play_power(seat: int, rank: int) -> int:
 	var bonus: int = 0
 	if mods != null:
-		bonus = mods.rank_power_bonus(seat, rank)
+		bonus = mods.rank_power_bonus(seat, base_of_rank(seat, rank))
 	return RankSystem.president_power(rank) + bonus
 
 func is_always_legal_rank(seat: int, rank: int) -> bool:
 	if mods == null:
 		return false
-	return mods.rank_always_legal(seat, rank)
+	return mods.rank_always_legal(seat, base_of_rank(seat, rank))
 
 func is_legal_combo(combo: Dictionary, seat: int = -1) -> bool:
 	var rank: int = int(combo.get("rank", 0))

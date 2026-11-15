@@ -1,7 +1,8 @@
 class_name UpgradeDB
 extends RefCounted
 
-## Persistent deck/run upgrades bought with gold.
+## Persistent deck/run upgrades. Gold-priced by default; chip-priced economy
+## pieces use currency "chips" so the desk can mix both wallets.
 
 const UPGRADES: Array = [
 	{"id": "packed", "name": "Packed Briefcase", "icon": "PAIR", "price": 12,
@@ -19,7 +20,7 @@ const UPGRADES: Array = [
 	{"id": "whip", "name": "Whip Count", "icon": "?", "price": 8,
 		"desc": "Once per round, see whether an AI can follow the trick."},
 	{"id": "lobbyist", "name": "Lobbyist", "icon": "-$", "price": 18,
-		"desc": "Desk prices −2 gold (stacks)."},
+		"desc": "Desk gold prices −2 (stacks)."},
 	{"id": "populist", "name": "Populist Wave", "icon": "HP+", "price": 11,
 		"desc": "If you were Asshole last round, heal 8 at the next deal."},
 	{"id": "oval", "name": "Oval Office", "icon": "OO", "price": 15,
@@ -28,6 +29,24 @@ const UPGRADES: Array = [
 		"desc": "Whip Count is available every look, not once."},
 	{"id": "safe_seat", "name": "Safe Seat", "icon": "5", "price": 16,
 		"desc": "Your HP cannot fall below 5 while you still have any."},
+	# --- Economy / synergy (gold) ---
+	{"id": "payroll", "name": "Payroll", "icon": "$$", "price": 10, "max": 3,
+		"desc": "+2 gold on every place payout (stacks). Snowballs with ante gold."},
+	{"id": "interest", "name": "Compound Interest", "icon": "%", "price": 14, "max": 3,
+		"desc": "When the desk opens, gain 10% of your gold (+5% per extra stack)."},
+	{"id": "chip_magnet", "name": "Chip Magnet", "icon": "◈+", "price": 12, "max": 3,
+		"desc": "+1 Survivor Chip whenever an AI is knocked out (stacks with the base chip)."},
+	{"id": "gold_rush", "name": "Gold Rush", "icon": "×$", "price": 16, "max": 2,
+		"desc": "Gold from rank customizations is multiplied by (1 + stacks)."},
+	# --- Economy / synergy (chips) ---
+	{"id": "war_chest", "name": "War Chest", "icon": "◈", "price": 3, "currency": "chips", "max": 5,
+		"desc": "Gain 1 Survivor Chip at the start of each round (stacks)."},
+	{"id": "syndicate", "name": "Syndicate", "icon": "◈$", "price": 4, "currency": "chips", "max": 3,
+		"desc": "At payout, gain 1 chip per $5 gold you earned that round (stacks add another per $5)."},
+	{"id": "patronage", "name": "Patronage", "icon": "-◈", "price": 5, "currency": "chips", "max": 3,
+		"desc": "Rank customization chip prices −1 (stacks, min 1)."},
+	{"id": "echo", "name": "Echo Chamber", "icon": "◈$", "price": 4, "currency": "chips", "max": 3,
+		"desc": "When a customized rank pays gold, also gain 1 chip per stack."},
 ]
 
 static func get_by_id(id: String) -> Dictionary:
@@ -37,7 +56,13 @@ static func get_by_id(id: String) -> Dictionary:
 	var m: Dictionary = RankModDB.get_by_id(id)
 	if not m.is_empty():
 		return m
+	var fx: Dictionary = RankEffectDB.get_by_id(id)
+	if not fx.is_empty():
+		return fx
 	return {}
+
+static func currency_of(item: Dictionary) -> String:
+	return str(item.get("currency", "gold"))
 
 static func shop_offers(rng: RandomNumberGenerator, count: int = 3) -> Array:
 	var pool: Array = UPGRADES.duplicate()

@@ -134,6 +134,7 @@ func _fill_rows(rows: Array) -> void:
 		wrap.add_child(m)
 		var lab: Label = Label.new()
 		var gold_bit: String = "   +$%d" % int(d["gold"]) if int(d.get("gold", 0)) > 0 else ""
+		var chip_bit: String = "   +◈%d" % int(d["chips"]) if int(d.get("chips", 0)) > 0 else ""
 		var hp_d: int = int(d.get("hp_delta", 0))
 		var streak: int = int(d.get("streak", 1))
 		var bonus: int = int(d.get("streak_bonus", 0))
@@ -142,8 +143,8 @@ func _fill_rows(rows: Array) -> void:
 			streak_bit = " ×%d" % streak
 		if bonus > 0:
 			streak_bit += " · streak bonus +%d" % bonus
-		lab.text = "%d.  %s    %s%s    HP %+d%s" % [
-			int(d.get("place", 0)), str(d.get("name", "?")), role, streak_bit, hp_d, gold_bit]
+		lab.text = "%d.  %s    %s%s    HP %+d%s%s" % [
+			int(d.get("place", 0)), str(d.get("name", "?")), role, streak_bit, hp_d, gold_bit, chip_bit]
 		lab.add_theme_font_size_override("font_size", 14)
 		lab.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		if int(d.get("seat", -1)) == 0:

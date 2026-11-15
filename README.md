@@ -33,9 +33,26 @@ There is **no win screen**. The run continues until every human hits 0 HP. Dead 
 
 The **odds line** under the trick is Hayden’s view of the rest of the table: unseen 2s / Aces / Kings (your copies subtracted, plus cards that already hit the table), then a guess at whether the next AI still holds a 2 or the current trick rank. Timid seats (Speaker persona 0) are biased toward *saving* bombs; aggressive seats toward dumping them. A pass on a trick they could have followed slashes those odds.
 
-## HP and gold
+## HP, gold, and Survivor Chips
 
 Everyone starts at **50 HP**. You do **not** die after round 1. **Every seat earns gold** — AIs shop and spend it.
+
+**Survivor Chips (◈)** are a second wallet for humans only. Whenever an AI hits 0 HP (end-of-round payout or mid-round whip damage), each living human gains chips (`1 + Chip Magnet stacks` per KO). Spend chips at the desk on **rank customizations** and chip-priced economy upgrades. Gold still buys the classic desk row.
+
+### Economy / synergy (first-pass)
+| Id | Currency | Effect |
+|---|---|---|
+| Payroll | gold | +2 gold on every place payout (stacks) |
+| Compound Interest | gold | Desk open: gain 10% gold (+5%/extra stack) |
+| Chip Magnet | gold | +1◈ per AI knockout (stacks) |
+| Gold Rush | gold | Rank-customization gold ×(1+stacks) |
+| War Chest | chips | +1◈ at the start of each round (stacks) |
+| Syndicate | chips | At payout, +1◈ per $5 you earned (stacks) |
+| Patronage | chips | Rank-fx chip prices −1 (stacks, min 1) |
+| Echo Chamber | chips | When a customized rank pays gold, also +1◈/stack |
+
+### Rank customizations
+Chip offers bind an effect to a **deal-face** (3…K, A, 2). Inflation / Incumbent change the printed number, but the customization still fires. Effects (level by rebuying): **gold**, **chips**, **power**, **damage** (weakest AI), **heal**, **always legal**, **buff hand** (promote lowest). Teal ribbon on the card shows the active effects.
 
 | Place | Gold | HP |
 |---|---|---|
@@ -46,7 +63,7 @@ Everyone starts at **50 HP**. You do **not** die after round 1. **Every seat ear
 | 5th | 7 | −stake |
 | 6th | 9 | −stake |
 
-**Ante** advances every 3 rounds. **Stake** = `5 + round + (ante−1)×3`. Every seat also gets `ante−1` bonus gold so the desk stays reachable. **Worse finish = more gold** so you can shop back in, but the table is tight: 1st can’t casually buy a $12 upgrade, and even 6th ($9) has to skip the expensive row. Top half of *living* seats gain HP; bottom half lose it. At 0 HP a human is out — when all humans are out, the run ends.
+**Ante** advances every 3 rounds. **Stake** = `5 + round + (ante−1)×3 + ⌊(round−1)/5⌋×2` (late tax so snowballs eventually lose). Rank inflation = `(r−1) + ⌊(r−1)²/6⌋`. AI revive HP scales with ante so knockouts (and chips) slow late while stake keeps climbing. Every seat also gets `ante−1` bonus gold. **Worse finish = more gold** so you can shop back in. Top half of *living* seats gain HP; bottom half lose it. At 0 HP a human is out — when all humans are out, the run ends.
 
 ## The desk (shop)
 

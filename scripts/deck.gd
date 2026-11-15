@@ -113,6 +113,9 @@ static func inflate_card_list(cards: Array, bonus: int) -> void:
 static func inflate_card(card: CardData, bonus: int) -> void:
 	if card == null or bonus <= 0 or RankSystem.is_joker(card.rank):
 		return
+	# Keep base_rank as the classic deal-face so rank customizations still match.
+	if card.base_rank <= 0:
+		card.base_rank = card.rank
 	var nxt: int = RankSystem.inflate_rank(card.rank, bonus)
 	if nxt == card.rank:
 		return

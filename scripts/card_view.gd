@@ -23,8 +23,11 @@ var _last_tap_msec: int = 0
 var shown_value: String = ""
 var printed_label: String = ""
 var value_buffed: bool = false
+## Rank customization badge (e.g. "+$2 ⚔1") shown on the face.
+var effect_badge: String = ""
 
 const BUFF_BLUE: Color = Color(0.08, 0.42, 0.98)
+const FX_TEAL: Color = Color(0.12, 0.55, 0.62)
 
 func _init(p_card: CardData = null, p_size: Vector2 = Vector2(W, H)) -> void:
 	card = p_card
@@ -43,11 +46,16 @@ func set_card(p_card: CardData, power_bonus: int = 0) -> void:
 	_sync_value(power_bonus)
 	queue_redraw()
 
+func set_effect_badge(text: String) -> void:
+	effect_badge = text
+	queue_redraw()
+
 func _sync_value(power_bonus: int = 0) -> void:
 	if card == null:
 		shown_value = ""
 		printed_label = ""
 		value_buffed = false
+		effect_badge = ""
 		return
 	var d: Dictionary = RankSystem.buff_display(card, power_bonus)
 	shown_value = str(d.get("shown", ""))
@@ -138,7 +146,9 @@ func _draw() -> void:
 		_draw_buff_badge(font, rect, s, shown_value, dimmed)
 	_draw_suit(inner.position + Vector2(12.0 * s, 34.0 * s), 8.0 * s, suit_col, card.suit)
 	_draw_suit(inner.position + Vector2(inner.size.x * 0.5, inner.size.y * 0.58), 16.0 * s, suit_col, card.suit)
-	if RankSystem.is_bomb(card.rank):
+	if effect_badge != "":
+		_draw_effect_ribbon(font, rect, s, effect_badge, dimmed)
+	elif RankSystem.is_bomb(card.rank):
 		var ribbon: Rect2 = Rect2(rect.position.x, rect.end.y - 16.0 * s, rect.size.x, 14.0 * s)
 		draw_rect(ribbon, Color(0.72, 0.10, 0.12, 0.92), true)
 		draw_string(font, Vector2(ribbon.position.x, ribbon.end.y - 3), "BOMB", HORIZONTAL_ALIGNMENT_CENTER, ribbon.size.x, int(10.0 * s), Color(1, 0.92, 0.55))
@@ -167,6 +177,17 @@ func _draw_joker(font: Font, rect: Rect2, inner: Rect2, s: float, is_dimmed: boo
 	var ribbon: Rect2 = Rect2(rect.position.x, rect.end.y - 16.0 * s, rect.size.x, 14.0 * s)
 	draw_rect(ribbon, Color(0.55, 0.22, 0.72, 0.95), true)
 	draw_string(font, Vector2(ribbon.position.x, ribbon.end.y - 3), "JOKER", HORIZONTAL_ALIGNMENT_CENTER, ribbon.size.x, int(10.0 * s), Color(1, 0.92, 0.55))
+
+func _draw_effect_ribbon(font: Font, rect: Rect2, s: float, label: String, is_dimmed: bool) -> void:
+	var ribbon: Rect2 = Rect2(rect.position.x, rect.end.y - 16.0 * s, rect.size.x, 14.0 * s)
+	var col: Color = FX_TEAL
+	if is_dimmed:
+		col.a = 0.55
+	draw_rect(ribbon, col, true)
+	var fs: int = int(9.0 * s)
+	if label.length() > 6:
+		fs = maxi(7, int(8.0 * s))
+	draw_string(font, Vector2(ribbon.position.x, ribbon.end.y - 3), label, HORIZONTAL_ALIGNMENT_CENTER, ribbon.size.x, fs, Color(1, 0.98, 0.92, 0.7 if is_dimmed else 1.0))
 
 func _draw_buff_badge(font: Font, rect: Rect2, s: float, label: String, is_dimmed: bool) -> void:
 	var badge_size: int = maxi(13, int(16.0 * s))

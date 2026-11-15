@@ -728,11 +728,12 @@ func _init() -> void:
 	_check(scale_run.stake() == 6, "round 1 stake is 5+1")
 	scale_run.round_n = 4
 	_check(scale_run.ante() == 2, "round 4 is ante 2")
-	_check(scale_run.rank_bonus() == 3 + int(9 / 8), "round 4 rank bonus formula")
+	_check(scale_run.rank_bonus() == 3 + int(9 / 6), "round 4 rank bonus formula")
 	_check(scale_run.stake() == 5 + 4 + 3, "round 4 stake adds ante pressure")
 	scale_run.round_n = 10
-	_check(scale_run.rank_bonus() == 9 + int(81 / 8), "round 10 rank bonus accelerates")
-	_check(scale_run.rank_bonus() >= 19, "mid-run bonus is meaningful")
+	_check(scale_run.rank_bonus() == 9 + int(81 / 6), "round 10 rank bonus accelerates")
+	_check(scale_run.rank_bonus() >= 20, "mid-run bonus is meaningful")
+	_check(scale_run.stake() == 5 + 10 + 9 + 2, "round 10 stake adds late tax")
 	scale_run.round_n = 40
 	_check(scale_run.rank_bonus() >= 200, "late-run bonus is huge")
 
@@ -784,6 +785,105 @@ func _init() -> void:
 	_check(int(next_r.hp[2]) > 0 and int(next_r.hp[4]) > 0, "next_round revives dead AIs")
 	next_r.free()
 
+	# --- Survivor Chips, economy, rank customizations ---
+	var chip_run: RunManager = RunManager.new()
+	chip_run.start_new_run()
+	_check(chip_run.chips == 0, "new run starts with 0 chips")
+	chip_run.hp[2] = 1
+	chip_run.hp[3] = 1
+	# Force two AI knockouts via a bottom-half finish for seats 2 and 3.
+	chip_run.apply_payouts([0, 1, 4, 5, 2, 3])
+	_check(chip_run.last_knockouts.has(2) or int(chip_run.hp[2]) == 0, "AI seat can be knocked out by payout")
+	var ko_n: int = chip_run.last_knockouts.size()
+	_check(ko_n >= 1, "at least one AI knockout recorded (%d)" % ko_n)
+	_check(chip_run.chips >= ko_n * RunManager.CHIP_PER_KO, "survivor chips granted on AI KO (%d chips for %d KOs)" % [chip_run.chips, ko_n])
+	chip_run.chips = 0
+	chip_run.owned_upgrades.append("chip_magnet")
+	chip_run.owned_upgrades.append("chip_magnet")
+	chip_run.last_knockouts = [4, 5]
+	chip_run._grant_survivor_chips({0: 10})
+	_check(chip_run.chips == (1 + 2) * 2, "chip magnet stacks on KO chips")
+	chip_run.chips = 0
+	chip_run.last_knockouts.clear()
+	chip_run.owned_upgrades.append("syndicate")
+	chip_run._grant_survivor_chips({0: 10})
+	_check(chip_run.chips == 2, "syndicate grants 1 chip per $5 earned")
+
+	chip_run.chips = 10
+	chip_run.gold = 0
+	_check(chip_run.buy_upgrade("fx_gold_5", 3), "can buy Mint Fives with chips")
+	_check(chip_run.chips == 7, "chip price deducted")
+	_check(chip_run.rank_effect_level(0, 5, "gold") == 1, "rank effect leveled to 1")
+	_check(chip_run.buy_upgrade("fx_gold_5", 3), "can level Mint Fives again")
+	_check(chip_run.rank_effect_level(0, 5, "gold") == 2, "rank effect leveled to 2")
+	_check(chip_run.rank_gold_on_play(0, 5) == 2, "gold-on-play matches level")
+	chip_run.owned_upgrades.append("gold_rush")
+	_check(chip_run.rank_gold_on_play(0, 5) == 4, "gold rush doubles customization gold")
+
+	var fx_res: Dictionary = chip_run.trigger_rank_play(0, 5, [])
+	_check(int(fx_res.get("gold", 0)) == 4, "trigger_rank_play pays gold")
+	_check(chip_run.gold == 4, "gold added to seat")
+	chip_run.bind_or_level_rank_effect(0, 5, "chips")
+	chip_run.chips = 0
+	var fx2: Dictionary = chip_run.trigger_rank_play(0, 5, [])
+	_check(int(fx2.get("chips", 0)) >= 1, "chip-on-play fires")
+	chip_run.bind_or_level_rank_effect(0, 4, "damage")
+	chip_run.bind_or_level_rank_effect(0, 4, "damage")
+	chip_run.hp[1] = 20
+	var hp_before_whip: int = int(chip_run.hp[1])
+	var fx3: Dictionary = chip_run.trigger_rank_play(0, 4, [])
+	_check(int(fx3.get("damage", 0)) == 2, "damage effect deals level HP")
+	_check(int(chip_run.hp[1]) == hp_before_whip - 2, "weakest AI lost HP")
+	_check(chip_run.rank_effect_badge(0, 5).contains("$") or chip_run.rank_effect_badge(0, 5).contains("◈"), "badge text for customized rank")
+
+	# Economy: payroll, interest, patronage, war chest, echo
+	var econ: RunManager = RunManager.new()
+	econ.start_new_run()
+	econ.owned_upgrades.append("payroll")
+	econ.owned_upgrades.append("payroll")
+	econ.apply_payouts([0, 1, 2, 3, 4, 5])
+	var pay_row: Dictionary = econ.last_payout[0]
+	_check(int(pay_row["gold"]) >= 2 + 4, "payroll adds +2 gold per stack on payout")
+	econ.gold = 100
+	econ.owned_upgrades.append("interest")
+	econ.open_shop_phase()
+	_check(econ.gold == 110, "compound interest grants 10% on desk open")
+	econ.chips = 10
+	econ.owned_upgrades.append("patronage")
+	econ.owned_upgrades.append("patronage")
+	_check(econ.shop_price_of(0, 5, "chips") == 3, "patronage discounts chip prices")
+	econ.chips = 0
+	econ.owned_upgrades.append("war_chest")
+	econ.owned_upgrades.append("war_chest")
+	econ.next_round()
+	_check(econ.chips == 2, "war chest pays chips each new round")
+	econ.bind_or_level_rank_effect(0, 3, "gold")
+	econ.owned_upgrades.append("echo")
+	econ.chips = 0
+	var echo_res: Dictionary = econ.trigger_rank_play(0, 3, [])
+	_check(int(echo_res.get("chips", 0)) >= 1, "echo grants chips when gold customizations fire")
+
+	# Inflation preserves base_rank for customization matching
+	var c_base: CardData = CardData.new(5, 0, true)
+	Deck.inflate_card(c_base, 12)
+	_check(c_base.base_rank == 5, "inflation keeps base_rank 5")
+	_check(c_base.rank != 5, "inflation changes face rank")
+	var packed_fx: Array = c_base.pack()
+	var unpacked_fx: CardData = CardData.unpack(packed_fx)
+	_check(unpacked_fx.base_rank == 5 and unpacked_fx.rank == c_base.rank, "base_rank survives pack")
+
+	var g_base: PresidentGame = PresidentGame.new()
+	g_base.living = [0, 1]
+	g_base.hands = {
+		0: [c_base],
+		1: [CardData.new(8, 0, true)],
+	}
+	g_base.mods = chip_run
+	_check(g_base.base_of_rank(0, c_base.rank) == 5, "game resolves base_of_rank through inflation")
+	_check(g_base.play_power(0, c_base.rank) >= RankSystem.president_power(c_base.rank) + chip_run.rank_power_bonus(0, 5), "play power uses base-rank bonus")
+
+	chip_run.free()
+	econ.free()
 	scale_run.free()
 	run.free()
 	if _failures == 0:
