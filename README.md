@@ -15,45 +15,62 @@ Play in the browser once GitHub Pages is on: https://continuitydev.github.io/Sol
 - 0 HP seats sit out the next deal.
 
 ### Your turn
-**Yellow cards** are legal. Tap one to auto-select the required count (one on lead — tap extras of that rank to add copies; on follow, exactly the trick count). Then **Play**, or **double-tap** a yellow card to play immediately. **Pass** is always legal except on lead. A **YOUR TURN** banner means Play is live — if it is someone else’s turn, wait for the fly-in. Action cards in your tray fire on your turn. Opponents show a fan of card-backs and a large count of cards left.
+**Yellow cards** are legal. Tap one to auto-select the required count (one on lead — tap extras of that rank to add copies; on follow, exactly the trick count). Then **Play**, or **double-tap** a yellow card to play immediately. **Pass** is always legal except on lead. A **YOUR TURN** banner means Play is live — if it is someone else’s turn, wait for the fly-in. Action cards in your tray fire on your turn. Opponents show a fan of card-backs, a large count of cards left, and their gold.
+
+The **odds line** under the trick is Hayden’s view of the rest of the table: unseen 2s / Aces / Kings (your copies subtracted, plus cards that already hit the table), then a guess at whether the next AI still holds a 2 or the current trick rank. Timid seats (Speaker persona 0) are biased toward *saving* bombs; aggressive seats toward dumping them. A pass on a trick they could have followed slashes those odds.
 
 ## HP and gold
 
-Everyone starts at **50 HP**. You do **not** die after round 1.
+Everyone starts at **50 HP**. You do **not** die after round 1. **Every seat earns gold** — AIs shop and spend it.
 
-| Place | Gold (you) | HP |
+| Place | Gold | HP |
 |---|---|---|
-| 1st | 4 | +stake |
-| 2nd | 6 | +stake |
-| 3rd | 8 | +half stake |
-| 4th | 12 | −half stake |
-| 5th | 16 | −stake |
-| 6th | 22 | −stake |
+| 1st | 2 | +stake |
+| 2nd | 3 | +stake |
+| 3rd | 4 | +half stake |
+| 4th | 5 | −half stake |
+| 5th | 7 | −stake |
+| 6th | 9 | −stake |
 
-Stake starts at 5 and climbs each round (`4 + round`). **Worse finish = more gold** so you can shop back in. Top half of *living* seats gain HP; bottom half lose it. At 0 HP you are out. Last living seat wins.
+Stake starts at 5 and climbs each round (`4 + round`). **Worse finish = more gold** so you can shop back in, but the table is tight: 1st can’t casually buy a $12 upgrade, and even 6th ($9) has to skip the expensive row. Top half of *living* seats gain HP; bottom half lose it. At 0 HP you are out. Last living seat wins.
 
 ## The desk (shop)
 
-After every round, spend gold. The Desk shows **4 random offers** (a mix of upgrades, actions, and enhancements) — not the whole catalog. **Reroll** redraws the stock for `$2 + $2 × rerolls this visit` (Lobbyist still discounts). Maxed copies do not restock.
+After every round, spend gold. The Desk shows **4 random offers** (a mix of upgrades, rank binds, actions, and enhancements) — not the whole catalog. **Reroll** redraws the stock for `$2 + $2 × rerolls this visit` (Lobbyist still discounts). Maxed copies do not restock.
 
-**Upgrades (keep):** Packed Briefcase, Favorite rank (2s / Aces / Kings), Deep Pockets, Incumbent, Whip Count, Lobbyist (cheaper desk), Populist Wave (heal if you were Asshole), Oval Office (+1 incoming tribute as President), Majority Whip, Safe Seat (HP floor 5).
+**Upgrades (keep):** Packed Briefcase **$12**, Favorite rank (2s **$16** / Aces **$14** / Kings **$12**), Deep Pockets **$14**, Incumbent **$10** (promote your lowest card one rank after each deal), Whip Count **$8**, Lobbyist **$18**, Populist Wave **$11**, Oval Office **$15**, Majority Whip **$10**, Safe Seat **$16**.
 
-**Enhancements:** Steel Card (immune to tribute), Gilded Seal (+gold on a top finish), Union Deal (smaller tributes), Wax Seal (return 1 fewer), Lucky Draw.
+**Rank binds (seat-scoped):** Gold Fives / Threes / Tens, Ace Authority, Kingmaker, Heavier Bombs, Strong Fives, Ace Privilege, Bomb Privilege. These only affect *your* plays — your 5s can pay gold or beat a 6; the Whip’s 5s do not.
 
-**Action cards (one-shot):** Veto, Filibuster, Executive Order, Leak, Tax, Rally, plus role cards — **Uprising** (swap President ↔ Asshole), **Just Say No** (cancel a tribute or a hostile action on you), Impeach, Pardon, Coup, Recess.
+**Enhancements:** Steel Card **$13**, Gilded Seal **$11**, Union Deal **$12**, Wax Seal **$10**, Lucky Draw **$9** (swap your lowest card with a random kitty card — does not add a card).
+
+**Action cards (one-shot):** Veto **$10**, Filibuster **$12**, Executive Order **$16**, Leak **$8**, Tax **$14**, Rally **$11** (promote two lowest cards), **Forge Bomb $10** (replace your lowest non-2 with a 2), plus role cards — **Uprising $15**, **Just Say No $13**, Impeach **$12**, Pardon **$14**, Coup **$18**, Recess **$16**.
+
+Nothing on the desk grants extra shop items or extra cards from the kitty. Transforms stay in-place.
 
 ### Role streak
-Finishing in the **same role** consecutive rounds pays bonus gold: streak 1 is base only; streak 2 is **+6**; streak 3 is **+12**; in general **`6 × (streak − 1)`**. It resets when your role changes. Every seat is tracked; results show e.g. `President ×3 · streak bonus +12`.
+Finishing in the **same role** consecutive rounds pays bonus gold: streak 1 is base only; streak 2 is **+3**; streak 3 is **+6**; in general **`3 × (streak − 1)`**. It resets when your role changes. Every seat is tracked; results show e.g. `President ×3 · streak bonus +6`.
 
 ## AIs
 
 The Speaker, The Whip, The Veep, The Justice, The General. They dump low cards, follow cheapest, and save 2s unless they are aggressive or about to go out.
+
+Each AI starts with a **personal rank specialty** (Speaker: stronger 2s, Whip: gold on 5s, Veep: Aces always legal, Justice: stronger Kings, General: gold on 3s). After payouts they auto-shop 0–1 item from a 2-offer personal desk with their own gold, and they **use** turn actions (Veto, Filibuster, Tax, Rally, Forge, …) and role cards (Uprising, Just Say No, …). Purchases and uses land in the round log so you can see them.
+
+## Personal rank effects
+
+Shop **rank binds** (or an AI specialty) attach an effect to one rank for **one seat**:
+
+- `gold_play` — +1 gold when that seat plays the rank
+- `power` — +1 follow power when that seat plays the rank (your 5s can equal a 6; theirs do not)
+- `always_legal` — that rank is always a legal follow of the matching count for that seat (Ace Privilege can follow a bomb)
 
 ## Run it
 
 Godot 4.3. Open `project.godot`, press Play.
 
 ```bash
+godot --headless --import
 godot --headless --script tests/logic_test.gd   # ALL TESTS PASSED
 cd docs && python3 -m http.server 8000          # web export
 ```

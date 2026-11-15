@@ -18,8 +18,9 @@ static func shuffle(cards: Array, rng: RandomNumberGenerator) -> void:
 		cards[j] = tmp
 
 ## Deal to living seats. Leftovers become the kitty.
-## packed / favorite_rank / extra_cards only bias seat 0 (the human).
-static func deal_president(living: Array, rng: RandomNumberGenerator, packed: int = 0, favorite_rank: int = 0, extra_cards: int = 0) -> Dictionary:
+## packed / favorite_rank bias a seat when asked; extra_cards is ignored
+## (item-grants became in-place promotes / kitty swaps).
+static func deal_president(living: Array, rng: RandomNumberGenerator, packed: int = 0, favorite_rank: int = 0, extra_cards: int = 0, packed_seat: int = 0) -> Dictionary:
 	var cards: Array = build_standard()
 	shuffle(cards, rng)
 	var n: int = living.size()
@@ -36,13 +37,10 @@ static func deal_president(living: Array, rng: RandomNumberGenerator, packed: in
 	while idx < cards.size():
 		kitty.append(cards[idx])
 		idx += 1
-	_apply_packed(hands, 0, packed, rng)
+	var _unused_e: int = extra_cards
+	_apply_packed(hands, packed_seat, packed, rng)
 	if favorite_rank >= 1 and favorite_rank <= 13:
-		_apply_favorite(hands, 0, favorite_rank, rng)
-	for _e in range(extra_cards):
-		if kitty.is_empty():
-			break
-		(hands[0] as Array).append(kitty.pop_back())
+		_apply_favorite(hands, packed_seat, favorite_rank, rng)
 	for seat4 in hands.keys():
 		_sort_hand(hands[seat4])
 	return {"hands": hands, "kitty": kitty}

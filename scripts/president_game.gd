@@ -24,6 +24,7 @@ var exec_order: bool = false
 var peek_seat: int = -1
 var round_over: bool = false
 var history: Array = []
+var mods: RunManager = null ## optional; seat-scoped rank power / gold / always-legal
 
 func setup(p_living: Array, rng: RandomNumberGenerator, packed: int = 0, favorite_rank: int = 0, extra_cards: int = 0, lead_seat: int = 0) -> void:
 	living = p_living.duplicate()
@@ -40,7 +41,13 @@ func setup(p_living: Array, rng: RandomNumberGenerator, packed: int = 0, favorit
 	trick_count = 0
 	trick_player = -1
 	passes = 0
-	var dealt: Dictionary = Deck.deal_president(living, rng, packed, favorite_rank, extra_cards)
+	mods = null
+	# packed / favorite / extra_cards are applied per-seat after deal by RunManager.
+	# Keep the args so older call sites still compile; they no longer grant cards.
+	var _unused_p: int = packed
+	var _unused_f: int = favorite_rank
+	var _unused_e: int = extra_cards
+	var dealt: Dictionary = Deck.deal_president(living, rng)
 	hands = dealt["hands"]
 	kitty = dealt["kitty"]
 	current_player = int(living[0])
@@ -57,7 +64,7 @@ func rank_is_legal(seat: int, rank: int) -> bool:
 		return true
 	if n < trick_count:
 		return false
-	return is_legal_combo({"rank": rank, "count": trick_count})
+	return is_legal_combo({"rank": rank, "count": trick_count}, seat)
 
 ## How many cards of a legal rank a tap should select.
 func auto_select_count() -> int:
@@ -94,23 +101,38 @@ func combos_in_hand(seat: int) -> Array:
 			out.append({"rank": int(r), "count": k})
 	return out
 
-func is_legal_combo(combo: Dictionary) -> bool:
+func play_power(seat: int, rank: int) -> int:
+	var bonus: int = 0
+	if mods != null:
+		bonus = mods.rank_power_bonus(seat, rank)
+	return RankSystem.president_power(rank) + bonus
+
+func is_always_legal_rank(seat: int, rank: int) -> bool:
+	if mods == null:
+		return false
+	return mods.rank_always_legal(seat, rank)
+
+func is_legal_combo(combo: Dictionary, seat: int = -1) -> bool:
 	var rank: int = int(combo.get("rank", 0))
 	var count: int = int(combo.get("count", 0))
 	if rank < 1 or rank > 13 or count < 1:
 		return false
+	if seat < 0:
+		seat = current_player
 	if lead:
 		return true
 	if count != trick_count:
 		return false
 	if exec_order:
 		return true
-	return RankSystem.president_power(rank) >= RankSystem.president_power(trick_rank)
+	if is_always_legal_rank(seat, rank):
+		return true
+	return play_power(seat, rank) >= RankSystem.president_power(trick_rank)
 
 func legal_combos(seat: int) -> Array:
 	var out: Array = []
 	for combo in combos_in_hand(seat):
-		if is_legal_combo(combo):
+		if is_legal_combo(combo, seat):
 			out.append(combo)
 	return out
 
@@ -131,7 +153,7 @@ func play(seat: int, combo: Dictionary) -> Dictionary:
 		return {"ok": false, "reason": "not your turn"}
 	if must_pass_seat == seat:
 		return {"ok": false, "reason": "filibustered"}
-	if not is_legal_combo(combo):
+	if not is_legal_combo(combo, seat):
 		return {"ok": false, "reason": "illegal"}
 	var rank: int = int(combo["rank"])
 	var count: int = int(combo["count"])

@@ -166,9 +166,9 @@ func _init() -> void:
 	var shop_run: RunManager = RunManager.new()
 	shop_run.start_new_run()
 	shop_run.gold = 200
-	_check(shop_run.buy_upgrade("packed", shop_run.shop_price(10)), "can buy packed")
-	_check(shop_run.buy_action("uprising", shop_run.shop_price(13)), "can buy uprising")
-	_check(shop_run.buy_enhancement("steel", shop_run.shop_price(11)), "can buy steel")
+	_check(shop_run.buy_upgrade("packed", shop_run.shop_price(int(UpgradeDB.get_by_id("packed")["price"]))), "can buy packed")
+	_check(shop_run.buy_action("uprising", shop_run.shop_price(int(ActionDB.get_by_id("uprising")["price"]))), "can buy uprising")
+	_check(shop_run.buy_enhancement("steel", shop_run.shop_price(int(EnhancementDB.get_by_id("steel")["price"]))), "can buy steel")
 	_check(shop_run.has_upgrade("packed") and shop_run.has_action("uprising") and shop_run.has_enhancement("steel"), "owned flags after buy")
 	shop_run.free()
 
@@ -257,7 +257,7 @@ func _init() -> void:
 	streak_run.apply_payouts([0, 1, 2, 3, 4, 5])
 	_check(int(streak_run.last_payout[0]["streak"]) == 2, "second consecutive President is streak 2")
 	_check(int(streak_run.last_payout[0]["streak_bonus"]) == RunManager.STREAK_UNIT, "streak 2 bonus is N")
-	_check(streak_run.gold == gold_s1 + 4 + RunManager.STREAK_UNIT, "human gold includes streak bonus")
+	_check(streak_run.gold == gold_s1 + int(RunManager.GOLD_BY_PLACE[1]) + RunManager.STREAK_UNIT, "human gold includes streak bonus")
 	streak_run.apply_payouts([0, 1, 2, 3, 4, 5])
 	_check(int(streak_run.last_payout[0]["streak"]) == 3 and int(streak_run.last_payout[0]["streak_bonus"]) == 2 * RunManager.STREAK_UNIT, "streak 3 bonus is 2N")
 	_check(int(streak_run.last_payout[1]["streak"]) == 3, "AI VP streak also climbs")
@@ -273,6 +273,180 @@ func _init() -> void:
 		if (c as CardData).rank == 2:
 			twos += 1
 	_check(twos >= 0, "favorite deal runs (2s in hand: %d)" % twos)
+
+	_check(int(RunManager.GOLD_BY_PLACE[1]) == 2, "1st place gold is 2")
+	_check(int(RunManager.GOLD_BY_PLACE[2]) == 3, "2nd place gold is 3")
+	_check(int(RunManager.GOLD_BY_PLACE[3]) == 4, "3rd place gold is 4")
+	_check(int(RunManager.GOLD_BY_PLACE[4]) == 5, "4th place gold is 5")
+	_check(int(RunManager.GOLD_BY_PLACE[5]) == 7, "5th place gold is 7")
+	_check(int(RunManager.GOLD_BY_PLACE[6]) == 9, "6th place gold is 9")
+	_check(RunManager.STREAK_UNIT == 3, "streak unit is 3")
+	_check(int(UpgradeDB.get_by_id("packed")["price"]) == 12, "packed costs 12")
+	_check(int(ActionDB.get_by_id("veto")["price"]) == 10, "veto costs 10")
+	_check(int(EnhancementDB.get_by_id("lucky")["price"]) == 9, "lucky costs 9")
+	_check(int(RankModDB.get_by_id("mod_gold_5")["price"]) == 8, "gold fives costs 8")
+
+	var eco: RunManager = RunManager.new()
+	eco.start_new_run()
+	eco.apply_payouts([0, 1, 2, 3, 4, 5])
+	_check(eco.gold == 2, "human 1st earns $2")
+	_check(eco.gold_of(5) == 9, "AI 6th earns $9")
+	_check(eco.gold_of(1) == 3, "AI 2nd earns $3")
+	eco.free()
+
+	# Card-replace: incumbent / lucky / rally do not add cards.
+	_check(ActionDB.get_by_id("rally")["desc"].find("Promote") >= 0, "rally is a promote, not a draw")
+	_check(ActionDB.get_by_id("forge").size() > 0, "forge bomb is in the catalog")
+	_check(EnhancementDB.get_by_id("lucky")["desc"].find("swap") >= 0, "lucky swaps with kitty")
+	_check(UpgradeDB.get_by_id("incumbent")["desc"].find("promote") >= 0, "incumbent promotes")
+	var c3: CardData = CardData.new(3, 0, true)
+	_check(CardForge.promote_card(c3) and c3.rank == 4, "promote 3→4")
+	var ace: CardData = CardData.new(1, 0, true)
+	_check(not CardForge.promote_card(ace) and ace.rank == 1, "Ace does not promote")
+	var bomb: CardData = CardData.new(2, 0, true)
+	_check(not CardForge.promote_card(bomb) and bomb.rank == 2, "2s do not promote")
+	var forge_hand: Array = [CardData.new(4, 1, true), CardData.new(9, 0, true)]
+	var n_forge: int = forge_hand.size()
+	var flab: String = CardForge.forge_bomb(forge_hand)
+	_check(flab != "" and forge_hand.size() == n_forge, "forge replaces in place")
+	_check((forge_hand[0] as CardData).rank == 2, "lowest card became a 2")
+	var promo_hand: Array = [CardData.new(3, 0, true), CardData.new(5, 1, true)]
+	var pn: int = promo_hand.size()
+	var plab: PackedStringArray = CardForge.promote_lowest(promo_hand, 2)
+	_check(promo_hand.size() == pn, "rally/promote does not add cards")
+	_check(plab.size() == 2, "two cards promoted")
+	var inc_run: RunManager = RunManager.new()
+	inc_run.start_new_run()
+	inc_run.owned_upgrades.append("incumbent")
+	inc_run.owned_enhancements.append("lucky")
+	rng.seed = 99
+	var ginc: PresidentGame = PresidentGame.new()
+	ginc.setup([0, 1, 2, 3, 4, 5], rng)
+	var h0: int = ginc.hand_of(0).size()
+	var k0: int = ginc.kitty.size()
+	inc_run.apply_deal_effects(ginc)
+	_check(ginc.hand_of(0).size() == h0, "incumbent+lucky do not add hand cards (%d vs %d)" % [ginc.hand_of(0).size(), h0])
+	_check(ginc.kitty.size() == k0, "lucky swap keeps kitty size")
+	_check(inc_run.extra_cards() == 0, "extra_cards grant is gone")
+	inc_run.free()
+
+	# Rank effects are seat-scoped.
+	var gr: PresidentGame = PresidentGame.new()
+	gr.living = [0, 1]
+	gr.hands = {
+		0: [CardData.new(5, 0, true)],
+		1: [CardData.new(5, 1, true), CardData.new(6, 0, true)],
+	}
+	gr.current_player = 0
+	gr.lead = false
+	gr.trick_rank = 6
+	gr.trick_count = 1
+	var rmod: RunManager = RunManager.new()
+	rmod.start_new_run()
+	rmod.bind_rank_mod(0, 5, "power")
+	gr.mods = rmod
+	_check(gr.is_legal_combo({"rank": 5, "count": 1}, 0), "your 5s with +1 power equal a 6")
+	_check(not gr.is_legal_combo({"rank": 5, "count": 1}, 1), "AI 5s without the bind do not beat a 6")
+	_check(gr.play_power(0, 5) == RankSystem.president_power(5) + 1, "player 5 power is base+1")
+	_check(gr.play_power(1, 5) == RankSystem.president_power(5), "AI 5 power is base")
+	rmod.bind_rank_mod(1, 1, "always_legal")
+	gr.hands[1].append(CardData.new(1, 2, true))
+	gr.trick_rank = 2
+	_check(gr.is_legal_combo({"rank": 1, "count": 1}, 1), "AI Ace privilege follows a bomb")
+	_check(not gr.is_legal_combo({"rank": 1, "count": 1}, 0), "player Aces without the bind cannot follow a bomb")
+	rmod.bind_rank_mod(0, 5, "gold_play")
+	_check(rmod.rank_gold_on_play(0, 5) == 1, "player earns gold on 5s")
+	_check(rmod.rank_gold_on_play(1, 5) == 0, "AI without gold-5s earns nothing on 5s")
+	_check(str(RankModDB.AI_SPEC[1]["effect"]) != "", "Speaker has a starter specialty")
+	var spec_run: RunManager = RunManager.new()
+	spec_run.start_new_run()
+	_check(spec_run.rank_mods_of(1).size() >= 1, "AI seats start with a rank bind")
+	_check(spec_run.rank_mods_of(0).is_empty(), "human starts with no rank bind")
+	spec_run.gold = 20
+	_check(spec_run.buy_upgrade("mod_gold_5", 8), "human can buy a rank bind")
+	_check(spec_run.rank_gold_on_play(0, 5) == 1, "bought Gold Fives binds to seat 0")
+	spec_run.free()
+	rmod.free()
+
+	# Odds helper: remaining cards + AI influence, not isolated deck math.
+	var og: PresidentGame = PresidentGame.new()
+	og.living = [0, 1, 2]
+	og.hands = {
+		0: [CardData.new(2, 0, true), CardData.new(2, 1, true), CardData.new(9, 0, true)],
+		1: [CardData.new(5, 0, true), CardData.new(5, 1, true), CardData.new(5, 2, true), CardData.new(8, 0, true)],
+		2: [CardData.new(4, 0, true), CardData.new(4, 1, true), CardData.new(7, 0, true)],
+	}
+	og.kitty = []
+	og.history = []
+	og.last_play_label = {}
+	_check(OddsHelper.unseen_of(og, 2, 0) == 2, "two 2s unseen (you hold 2, none played)")
+	_check(OddsHelper.unseen_of(og, 1, 0) == 4, "all aces unseen")
+	og.history.append({"seat": 2, "rank": 2, "count": 1})
+	_check(OddsHelper.unseen_of(og, 2, 0) == 1, "played 2 drops unseen 2s to 1")
+	og.living = [0, 3, 2]
+	og.hands[3] = [CardData.new(5, 0, true), CardData.new(5, 1, true), CardData.new(5, 2, true), CardData.new(8, 0, true)]
+	og.hands[2] = [CardData.new(4, 0, true), CardData.new(4, 1, true), CardData.new(7, 0, true), CardData.new(8, 1, true)]
+	var p_save: float = OddsHelper.p_seat_holds_rank(og, 3, 2, 0)
+	var p_dump: float = OddsHelper.p_seat_holds_rank(og, 2, 2, 0)
+	_check(p_save > p_dump, "timid seat more likely to still hold a 2 than aggressive (%f vs %f)" % [p_save, p_dump])
+	og.last_play_label[3] = "pass"
+	og.lead = false
+	og.trick_rank = 2
+	og.trick_count = 1
+	var p_pass: float = OddsHelper.p_seat_holds_rank(og, 3, 2, 0)
+	_check(p_pass < p_save, "a pass on a 2-trick slashes P(holds a 2) (%f vs %f)" % [p_pass, p_save])
+	var hud: String = OddsHelper.hud_text(og, null, 0)
+	_check(hud.find("unseen") >= 0, "odds HUD mentions unseen ranks")
+	_check(OddsHelper.p_pair_unseen(og, 13, 0) >= 0.0 and OddsHelper.p_pair_unseen(og, 13, 0) <= 1.0, "pair odds in 0..1")
+
+	# AI purchase + use path.
+	var ai_run: RunManager = RunManager.new()
+	ai_run.start_new_run()
+	ai_run.rng.seed = 4
+	ai_run.apply_payouts([1, 2, 3, 4, 5, 0])
+	_check(ai_run.gold_of(1) > 0, "AI President earned gold")
+	ai_run.seat_gold[1] = 40
+	ai_run.last_finish = [1, 2, 3, 4, 5, 0]
+	var shop_logs: Array = ai_run.ai_shop_all()
+	_check(shop_logs.size() >= 1, "at least one AI bought from the desk (%d logs)" % shop_logs.size())
+	var bought: bool = false
+	for s in range(1, 6):
+		if not ai_run.upgrades_of(s).is_empty() or not ai_run.actions_of(s).is_empty() or not ai_run.enhancements_of(s).is_empty():
+			bought = true
+		if ai_run.rank_mods_of(s).size() > 1:
+			bought = true
+	_check(bought, "an AI inventory is no longer empty after shopping")
+	_check(ai_run.gold_of(1) < 40, "AI gold was spent")
+	ai_run.actions_of(2).append("filibuster")
+	var gai: PresidentGame = PresidentGame.new()
+	gai.living = [0, 1, 2]
+	gai.hands = {
+		0: [CardData.new(4, 0, true)],
+		1: [CardData.new(5, 0, true)],
+		2: [CardData.new(6, 0, true), CardData.new(7, 0, true)],
+	}
+	gai.current_player = 2
+	gai.lead = false
+	gai.trick_rank = 4
+	gai.trick_count = 1
+	var pick_act: String = PresidentAI.choose_turn_action(gai, ai_run, 2)
+	_check(pick_act == "filibuster", "AI with Filibuster spends it on a follow (%s)" % pick_act)
+	_check(ai_run.spend_action_for(2, "filibuster"), "AI spend_action_for removes Filibuster")
+	var fx: Dictionary = ActionFx.apply_turn(gai, ai_run, 2, "filibuster")
+	_check(bool(fx.get("ok", false)), "AI Filibuster applies")
+	_check(gai.must_pass_seat == ActionFx.next_opponent(gai, 2), "Filibuster marks the next opponent")
+	_check(str(fx.get("message", "")).find("Filibuster") >= 0, "use is logged")
+	ai_run.actions_of(1).append("uprising")
+	ai_run.last_finish = [0, 2, 3, 4, 5, 1]
+	var role_logs: Array = ai_run.ai_results_actions()
+	_check(role_logs.size() >= 1, "AI Asshole fires Uprising")
+	_check(int(ai_run.last_finish[0]) == 1, "Uprising swapped AI into President")
+	ai_run.free()
+
+	var shop_pick: Dictionary = PresidentAI.choose_shop(
+		[{"id": "just_say_no", "name": "Just Say No", "price": 13, "kind": "action"}],
+		20, 0, RoleTrade.ROLE_SCUM)
+	_check(str(shop_pick.get("id", "")) == "just_say_no", "AI Asshole prefers Just Say No")
 
 	run.free()
 	if _failures == 0:
