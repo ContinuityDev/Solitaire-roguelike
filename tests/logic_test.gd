@@ -327,9 +327,9 @@ func _init() -> void:
 	var promo_d: Dictionary = RankSystem.buff_display(c3, 0)
 	_check(bool(promo_d["buffed"]) and str(promo_d["shown"]) == "4" and str(promo_d["printed"]) == "3", "Incumbent/Rally keeps a printed 3 and a blue 4")
 	var ace: CardData = CardData.new(1, 0, true)
-	_check(not CardForge.promote_card(ace) and ace.rank == 1, "Ace does not promote")
+	_check(CardForge.promote_card(ace) and ace.rank == 2, "Ace promotes to bomb (uncapped climb)")
 	var bomb: CardData = CardData.new(2, 0, true)
-	_check(not CardForge.promote_card(bomb) and bomb.rank == 2, "2s do not promote")
+	_check(CardForge.promote_card(bomb) and bomb.rank == 16, "2s promote into super ranks")
 	var forge_hand: Array = [CardData.new(4, 1, true), CardData.new(9, 0, true)]
 	var n_forge: int = forge_hand.size()
 	var flab: String = CardForge.forge_bomb(forge_hand)
@@ -595,14 +595,18 @@ func _init() -> void:
 	hot_run._check_end()
 	_check(hot_run.run_over and not hot_run.run_won, "all humans dead is a loss")
 	hot_run.free()
-	var win_run: RunManager = RunManager.new()
-	win_run.start_new_run(loc)
-	win_run.hp[0] = 0
-	win_run.hp[2] = 0
-	win_run.hp[3] = 0
-	win_run._check_end()
-	_check(win_run.run_over and win_run.run_won, "last living human wins")
-	win_run.free()
+	var endless_run: RunManager = RunManager.new()
+	endless_run.start_new_run(loc)
+	endless_run.hp[0] = 0
+	endless_run.hp[2] = 0
+	endless_run.hp[3] = 0
+	endless_run._check_end()
+	_check(not endless_run.run_over, "last living human does not end an endless run")
+	_check(not endless_run.run_won, "endless runs never set run_won")
+	endless_run.revive_cabinet()
+	_check(int(endless_run.hp[2]) > 0 and int(endless_run.hp[3]) > 0, "revive_cabinet restores dead AIs")
+	_check(int(endless_run.hp[0]) == 0, "revive_cabinet does not revive humans")
+	endless_run.free()
 
 	# LAN table: host is seat 0, joiners take empty AI seats, names stick.
 	var lan: LobbyConfig = LobbyConfig.new()
@@ -691,6 +695,96 @@ func _init() -> void:
 	tv.queue_free()
 	pin_host.queue_free()
 
+	# --- Endless scaling, lose condition, compact ranks ---
+	_check(NumFormat.compact(42) == "42", "compact under 1K stays plain")
+	_check(NumFormat.compact(1200) == "1.2K", "compact thousands")
+	_check(NumFormat.compact(3_400_000) == "3.4M", "compact millions")
+	_check(NumFormat.compact(2_000_000_000) == "2B", "compact billions trim .0")
+	_check(NumFormat.compact(0) == "0", "compact zero")
+
+	_check(RankSystem.inflate_rank(3, 0) == 3, "inflate bonus 0 is identity")
+	_check(RankSystem.inflate_rank(3, 10) == 13, "inflate 3+10 → King")
+	_check(RankSystem.inflate_rank(13, 1) == 1, "inflate King+1 → Ace")
+	_check(RankSystem.inflate_rank(1, 1) == 2, "inflate Ace+1 → bomb")
+	_check(RankSystem.inflate_rank(2, 1) == 16, "inflate bomb+1 → first super rank")
+	_check(RankSystem.president_power(25) == 25, "super rank power equals face")
+	_check(RankSystem.short_label(25) == "25", "super rank label is numeric")
+	_check(RankSystem.short_label(1500) == "1.5K", "huge rank uses compact label")
+	var super_card: CardData = CardData.new(16, 0, true)
+	var super_d: Dictionary = RankSystem.buff_display(super_card, 0)
+	_check(str(super_d["shown"]) == "16" and not bool(super_d["buffed"]), "super face 16 reads as 16, not 2+")
+
+	_check(CardForge.next_rank(13) == 1, "King promotes to Ace")
+	_check(CardForge.next_rank(1) == 2, "Ace promotes to bomb")
+	_check(CardForge.next_rank(2) == 16, "bomb promotes into super ranks")
+	_check(CardForge.next_rank(16) == 17, "super ranks climb without cap")
+	var climb: CardData = CardData.new(2, 1, true)
+	CardForge.promote_card(climb)
+	_check(climb.rank == 16, "promote_card climbs bomb to 16")
+
+	var scale_run: RunManager = RunManager.new()
+	scale_run.start_new_run()
+	_check(scale_run.ante() == 1 and scale_run.rank_bonus() == 0, "round 1 ante 1, no rank bonus")
+	_check(scale_run.stake() == 6, "round 1 stake is 5+1")
+	scale_run.round_n = 4
+	_check(scale_run.ante() == 2, "round 4 is ante 2")
+	_check(scale_run.rank_bonus() == 3 + int(9 / 8), "round 4 rank bonus formula")
+	_check(scale_run.stake() == 5 + 4 + 3, "round 4 stake adds ante pressure")
+	scale_run.round_n = 10
+	_check(scale_run.rank_bonus() == 9 + int(81 / 8), "round 10 rank bonus accelerates")
+	_check(scale_run.rank_bonus() >= 19, "mid-run bonus is meaningful")
+	scale_run.round_n = 40
+	_check(scale_run.rank_bonus() >= 200, "late-run bonus is huge")
+
+	rng.seed = 99
+	var g_inf: PresidentGame = PresidentGame.new()
+	g_inf.setup([0, 1, 2, 3, 4, 5], rng)
+	Deck.inflate_hands(g_inf.hands, 12)
+	var saw_super: bool = false
+	var min_p: int = 999999
+	for s_inf in g_inf.living:
+		for c_inf in g_inf.hand_of(int(s_inf)):
+			var rr: int = (c_inf as CardData).rank
+			if RankSystem.is_joker(rr):
+				continue
+			var pp: int = RankSystem.president_power(rr)
+			if pp < min_p:
+				min_p = pp
+			if RankSystem.is_super(rr):
+				saw_super = true
+	_check(saw_super, "deal inflation produces super ranks")
+	_check(min_p >= 3 + 12, "inflation lifts the floor by the bonus")
+	g_inf.lead = true
+	g_inf.current_player = 0
+	var any_rank: int = 0
+	for c0 in g_inf.hand_of(0):
+		if not RankSystem.is_joker((c0 as CardData).rank):
+			any_rank = (c0 as CardData).rank
+			break
+	_check(g_inf.is_legal_combo({"rank": any_rank, "count": 1}, 0), "super/inflated ranks are legal on lead")
+
+	var lose_run: RunManager = RunManager.new()
+	lose_run.start_new_run()
+	lose_run.round_n = 7
+	lose_run.hp[0] = 0
+	lose_run._check_end()
+	_check(lose_run.run_over and not lose_run.run_won, "human at 0 HP ends the endless run as a loss")
+	RunManager.record_best_round(7)
+	_check(RunManager.load_best_round() >= 7, "best round persists to user://")
+	RunManager.record_best_round(3)
+	_check(RunManager.load_best_round() >= 7, "lower round does not overwrite best")
+	lose_run.free()
+
+	var next_r: RunManager = RunManager.new()
+	next_r.start_new_run()
+	next_r.hp[2] = 0
+	next_r.hp[4] = 0
+	next_r.next_round()
+	_check(next_r.round_n == 2, "next_round increments")
+	_check(int(next_r.hp[2]) > 0 and int(next_r.hp[4]) > 0, "next_round revives dead AIs")
+	next_r.free()
+
+	scale_run.free()
 	run.free()
 	if _failures == 0:
 		print("ALL TESTS PASSED")

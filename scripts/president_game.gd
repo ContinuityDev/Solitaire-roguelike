@@ -140,7 +140,8 @@ func is_legal_combo(combo: Dictionary, seat: int = -1) -> bool:
 	var count: int = int(combo.get("count", 0))
 	if RankSystem.is_joker(rank):
 		return count == 1
-	if rank < 1 or rank > 13 or count < 1:
+	# Ranks may exceed 13 after round inflation / uncapped promotes.
+	if rank < 1 or count < 1:
 		return false
 	if seat < 0:
 		seat = current_player

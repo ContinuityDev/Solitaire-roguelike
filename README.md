@@ -1,31 +1,32 @@
 # President
 
-A cabinet shedding game. **Title screen** first — pick a mode:
+A cabinet shedding game with an **endless Balatro-style run**. **Title screen** first — pick a mode:
 
-- **Solo / vs AIs** — you versus five cabinet AIs (the full President run).
+- **Solo / vs AIs** — you versus five cabinet AIs (endless ante climb).
 - **Local Lobby** — host 2–6 seats. You are always **player one** (rename yourself). **Hotseat** still works on this device. The gold **4-letter table code** is how someone else sits down from another browser on this same page (WebRTC, peer-to-peer). Empty seats stay AIs.
 - **Join Table** — your name + the host’s table code. Two phones, two tabs, or a friend on the same Wi-Fi. You take the next empty seat. Desktop Godot still also does classic **LAN by IP** (UDP 24567).
 
 Play in the browser once GitHub Pages is on: https://continuitydev.github.io/Solitaire-roguelike/
 
 ### How to start
-1. Open the game. You land on **PRESIDENT / THE CABINET**, not in a run.
-2. **Solo / vs AIs** starts a 6-seat run immediately (you + five AIs). **Title** on the table (or game-over) returns to the menu. **New Run** restarts the same mode.
+1. Open the game. You land on **PRESIDENT / THE CABINET**, not in a run. The title shows your **best round** reached.
+2. **Solo / vs AIs** starts a 6-seat endless run immediately (you + five AIs). **Title** on the table (or game-over) returns to the menu. **New Run** restarts the same mode.
 3. **Local Lobby** — table name, **your name** (player one), a **4-letter code**, **+/– seats** (2–6), each row **Human** or **AI**. Seat 1 is the host (always human). **Empty → AI** fills the rest. **Start** deals. Share the code; friends open this same page → **Join Table**. When another *local* human’s turn comes up, **Pass the device** covers the cards until they tap **I’m P#**. Remote joiners play on their own phone — they only see their own hand.
 4. **Join Table** — your name, the host’s 4-letter code, **Sit down**. Wait for the host to Start. If they leave, you drop back to title. If you disconnect mid-run, the host turns your seat into an AI. Signaling uses a public MQTT broker; game traffic is peer-to-peer WebRTC (STUN). Strict mobile NATs may fail without a TURN server — same Wi-Fi is the reliable case.
 
-Last living **human** wins the run. If every human hits 0 HP, the cabinet outlasts you.
+There is **no win screen**. The run continues until every human hits 0 HP. Dead AI seats are revived between rounds so the cabinet never collapses into a last-seat finish. How far you got (round / ante) is the score; best round is saved locally.
 
 ## How a round works
 
-- **54-card deck** (52 + **2 jokers**), six seats. Rank order: **3 lowest … King, Ace, then 2s (bombs)**.
+- **54-card deck** (52 + **2 jokers**), six seats. Rank order: **3 lowest … King, Ace, then 2s (bombs)**, then uncapped **super ranks** (16, 17, …) once inflation / Incumbent climb past bombs.
+- Each round applies **rank inflation** (`bonus = (r−1) + ⌊(r−1)² / 8⌋` where `r` is the round). Faces show compact labels at huge values (`1.2K`, `3.4M`, scientific past trillions).
 - Play **N of a kind** (single, pair, trips, four). Follow with the same count, equal or **higher effective rank**. A blue value is the trick’s true rank: if someone plays a 5 that reads as a blue 6, the trick is a 6 — a printed 5 cannot follow. Pass if you cannot or will not.
 - **Joker (instant round-ender):** a single joker is always legal on your turn (lead or follow, any count). Playing it dumps the rest of that seat’s hand to the kitty, that seat **finishes immediately** (President if they are first out), and the round is over. Remaining seats are ranked by **fewest cards left** (seat index breaks ties). Jokers have a purple **Jk / JOKER** face (red or black star).
 - When everyone else passes, the last player to play **leads** anything.
 - **Host leads round 1** (seat 0). Later rounds, last round’s 1st place leads if they are still living; otherwise the host does.
 - First empty hand is 1st (**President**). Play continues until everyone is placed: VP, Neutral, Vice-Asshole, **Asshole**.
 - After the next deal, classic **tribute**: Asshole gives their 2 highest cards to President, who returns any 2; Vice-Asshole gives 1 highest to VP, who returns 1. Dead seats skip. With 3 living only the 2-card trade runs; with 2, no trade.
-- 0 HP seats sit out the next deal.
+- Human seats at 0 HP sit out (and end the run when every human is out). Dead **AI** seats are revived at the next round so the table stays full.
 
 ### Your turn
 **Yellow cards** are legal. Tap one to auto-select the required count (one on lead — tap extras of that rank to add copies; on follow, exactly the trick count). Then **Play**, or **double-tap** a yellow card to play immediately. **Pass** is always legal except on lead. A **YOUR TURN** banner means Play is live — if it is someone else’s turn, wait for the fly-in. Action cards in your tray fire on your turn. Opponents show a fan of card-backs, a large count of cards left, and their gold.
@@ -45,7 +46,7 @@ Everyone starts at **50 HP**. You do **not** die after round 1. **Every seat ear
 | 5th | 7 | −stake |
 | 6th | 9 | −stake |
 
-Stake starts at 5 and climbs each round (`4 + round`). **Worse finish = more gold** so you can shop back in, but the table is tight: 1st can’t casually buy a $12 upgrade, and even 6th ($9) has to skip the expensive row. Top half of *living* seats gain HP; bottom half lose it. At 0 HP you are out. Last living seat wins.
+**Ante** advances every 3 rounds. **Stake** = `5 + round + (ante−1)×3`. Every seat also gets `ante−1` bonus gold so the desk stays reachable. **Worse finish = more gold** so you can shop back in, but the table is tight: 1st can’t casually buy a $12 upgrade, and even 6th ($9) has to skip the expensive row. Top half of *living* seats gain HP; bottom half lose it. At 0 HP a human is out — when all humans are out, the run ends.
 
 ## The desk (shop)
 

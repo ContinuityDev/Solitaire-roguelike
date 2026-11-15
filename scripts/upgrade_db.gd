@@ -15,7 +15,7 @@ const UPGRADES: Array = [
 	{"id": "pockets", "name": "Deep Pockets", "icon": "HP", "price": 14,
 		"desc": "+10 max HP and heal 10 now."},
 	{"id": "incumbent", "name": "Incumbent", "icon": "↑", "price": 10,
-		"desc": "After each deal, promote your lowest card one rank (Ace max; 2s stay)."},
+		"desc": "After each deal, promote your lowest card one rank (climbs past bombs into uncapped super ranks)."},
 	{"id": "whip", "name": "Whip Count", "icon": "?", "price": 8,
 		"desc": "Once per round, see whether an AI can follow the trick."},
 	{"id": "lobbyist", "name": "Lobbyist", "icon": "-$", "price": 18,

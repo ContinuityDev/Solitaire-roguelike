@@ -122,7 +122,9 @@ func _draw() -> void:
 		suit_col.a = 0.38
 	var face_lab: String = printed_label if printed_label != "" else RankSystem.short_label(card.rank)
 	var rank_size: int = maxi(16, int(22.0 * s))
-	if face_lab.length() > 1:
+	if face_lab.length() > 2:
+		rank_size = maxi(10, int(14.0 * s))
+	elif face_lab.length() > 1:
 		rank_size = maxi(14, int(18.0 * s))
 	draw_string(font, Vector2(inner.position.x + 3, inner.position.y + 18.0 * s), face_lab, HORIZONTAL_ALIGNMENT_LEFT, -1, rank_size, suit_col)
 	if value_buffed and shown_value != "" and shown_value != face_lab:
@@ -168,7 +170,9 @@ func _draw_joker(font: Font, rect: Rect2, inner: Rect2, s: float, is_dimmed: boo
 
 func _draw_buff_badge(font: Font, rect: Rect2, s: float, label: String, is_dimmed: bool) -> void:
 	var badge_size: int = maxi(13, int(16.0 * s))
-	if label.length() > 1:
+	if label.length() > 3:
+		badge_size = maxi(9, int(11.0 * s))
+	elif label.length() > 1:
 		badge_size = maxi(11, int(13.0 * s))
 	var tw: float = font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, badge_size).x
 	var pad: float = maxf(3.0, 4.0 * s)

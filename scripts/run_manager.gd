@@ -1,8 +1,9 @@
 class_name RunManager
 extends Node
 
-## President run: HP, gold, round stake, owned upgrades, action inventory.
-## Human vs AI is LobbyConfig (solo = seat 0 human, 1–5 AIs). Every seat has gold.
+## Endless President run: HP, gold, escalating stake/ranks, owned upgrades,
+## action inventory. Human vs AI is LobbyConfig (solo = seat 0 human, 1–5 AIs).
+## The run never "wins" — it continues until every human hits 0 HP.
 
 signal changed
 
@@ -12,6 +13,10 @@ const NAMES: Array = ["You", "The Speaker", "The Whip", "The Veep", "The Justice
 ## index = place 1..6. Tight: 1st $2 … 6th $9. Mid-run you cannot buy the desk.
 const GOLD_BY_PLACE: Array = [0, 2, 3, 4, 5, 7, 9]
 const STREAK_UNIT: int = 3 # bonus gold = STREAK_UNIT * (streak - 1)
+const BEST_PATH: String = "user://president_best.cfg"
+## Dead AI seats return with this much HP (scaled up by stake) so the table
+## never collapses into a last-seat "win".
+const AI_REVIVE_BASE: int = 20
 
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var round_n: int = 1
@@ -210,8 +215,23 @@ func living_seats() -> Array:
 func is_alive(seat: int) -> bool:
 	return int(hp[seat]) > 0
 
+## Balatro-ish ante index (1-based). Bumps every 3 rounds.
+func ante() -> int:
+	return int((round_n - 1) / 3) + 1
+
+## HP stake for the round. Climbs with round and ante so pressure never soft-caps.
+## Round 1 → 6, Round 4 (ante 2) → 13, Round 10 → 25, …
 func stake() -> int:
-	return 4 + round_n
+	return 5 + round_n + (ante() - 1) * 3
+
+## Follow-power added to every dealt card this round (physical rank inflation).
+## Round 1 → 0; grows linearly then quadratically so faces hit K/M territory.
+## Round 2 → 1, Round 5 → 6, Round 10 → 20, Round 20 → 66, Round 40 → 235, …
+func rank_bonus() -> int:
+	var r: int = round_n - 1
+	if r <= 0:
+		return 0
+	return r + int((r * r) / 8)
 
 func gold_of(seat: int) -> int:
 	_ensure_seat_arrays()
@@ -436,6 +456,9 @@ func apply_payouts(finish_order: Array) -> void:
 		var role: String = str(roles.get(seat, {}).get("role", RoleTrade.ROLE_NEUTRAL))
 		var streak: int = _tick_role_streak(seat, role)
 		var streak_bonus: int = streak_bonus_gold(streak)
+		# Ante stipend keeps the desk reachable as stakes climb.
+		var ante_gold: int = ante() - 1
+		gold_gain += ante_gold
 		if has_enhancement_of(seat, "gilded") and place <= 2:
 			gold_gain += 2 * count_enhancement_of(seat, "gilded")
 		gold_gain += streak_bonus
@@ -453,16 +476,44 @@ func apply_payouts(finish_order: Array) -> void:
 	_check_end()
 	changed.emit()
 
+## Endless: only a total human wipeout ends the run. Last seat standing is
+## not a win — dead AIs are revived before the next deal.
 func _check_end() -> void:
-	var live: Array = living_seats()
 	var live_h: Array = living_humans()
 	if live_h.is_empty():
 		run_over = true
 		run_won = false
+		record_best_round(round_n)
 		return
-	if live.size() == 1:
-		run_over = true
-		run_won = is_human(int(live[0]))
+	run_over = false
+	run_won = false
+
+## Bring every dead AI seat back so the cabinet always fills the table.
+func revive_cabinet() -> void:
+	_ensure_seat_arrays()
+	var revive_hp: int = mini(START_HP, maxi(AI_REVIVE_BASE, stake() + 8))
+	for seat in range(seat_count):
+		if is_human(seat):
+			continue
+		if int(hp[seat]) <= 0:
+			hp[seat] = revive_hp
+	changed.emit()
+
+static func load_best_round() -> int:
+	var cf: ConfigFile = ConfigFile.new()
+	if cf.load(BEST_PATH) != OK:
+		return 0
+	return int(cf.get_value("stats", "best_round", 0))
+
+static func record_best_round(reached: int) -> void:
+	if reached <= 0:
+		return
+	var cf: ConfigFile = ConfigFile.new()
+	cf.load(BEST_PATH)
+	var prev: int = int(cf.get_value("stats", "best_round", 0))
+	if reached > prev:
+		cf.set_value("stats", "best_round", reached)
+		cf.save(BEST_PATH)
 
 func buy_upgrade(id: String, price: int) -> bool:
 	return buy_upgrade_for(shop_seat, id, price)
@@ -560,6 +611,7 @@ func next_round() -> void:
 	round_n += 1
 	whip_used = false
 	close_shop_phase()
+	revive_cabinet()
 	changed.emit()
 
 func open_shop_phase() -> Array:
@@ -710,6 +762,11 @@ func ai_shop_all() -> Array:
 
 func apply_deal_effects(game: PresidentGame) -> Array:
 	var logs: Array = []
+	var bonus: int = rank_bonus()
+	if bonus > 0:
+		Deck.inflate_hands(game.hands, bonus)
+		Deck.inflate_card_list(game.kitty, bonus)
+		logs.append("Rank inflation +%s (ante %d)." % [NumFormat.compact(bonus), ante()])
 	for seat in game.living:
 		var s: int = int(seat)
 		Deck._apply_packed(game.hands, s, packed_level_of(s), rng)
@@ -718,9 +775,9 @@ func apply_deal_effects(game: PresidentGame) -> Array:
 			Deck._apply_favorite(game.hands, s, fav, rng)
 		var promo: int = promote_level_of(s)
 		if promo > 0 and game.hands.has(s):
-			var changed: PackedStringArray = CardForge.promote_lowest(game.hands[s], promo)
-			if not changed.is_empty():
-				logs.append("%s incumbent: %s" % [name_of(s), ", ".join(changed)])
+			var changed_labs: PackedStringArray = CardForge.promote_lowest(game.hands[s], promo)
+			if not changed_labs.is_empty():
+				logs.append("%s incumbent: %s" % [name_of(s), ", ".join(changed_labs)])
 		var lucky_n: int = count_enhancement_of(s, "lucky")
 		for _i in range(lucky_n):
 			if not game.hands.has(s):

@@ -546,17 +546,24 @@ func _start_round() -> void:
 		_show_run_over()
 		_lan_push()
 		return
+	# Endless: keep the cabinet seated so a depleted AI table cannot soft-end.
+	run.revive_cabinet()
 	var live: Array = run.living_seats()
 	if live.size() < 2:
+		# Only reachable if the lobby itself has <2 seats configured.
+		run.run_over = true
+		run.run_won = false
+		RunManager.record_best_round(run.round_n)
 		_show_run_over()
 		return
 	run.apply_populist()
 	game.setup(live, run.rng, 0, 0, 0, run.lead_seat())
 	var deal_logs: Array = run.apply_deal_effects(game)
 	if _is_human(game.current_player):
-		_message("Round %d. Stake %d. %s leads — yellow cards can be played." % [run.round_n, run.stake(), run.name_of(game.current_player)])
+		_message("Round %d · Ante %d · Stake %d · Rank+%s. %s leads — yellow cards can be played." % [
+			run.round_n, run.ante(), run.stake(), NumFormat.compact(run.rank_bonus()), run.name_of(game.current_player)])
 	else:
-		_message("Round %d. %s leads." % [run.round_n, run.name_of(game.current_player)])
+		_message("Round %d · Ante %d. %s leads." % [run.round_n, run.ante(), run.name_of(game.current_player)])
 	if not deal_logs.is_empty():
 		for line in deal_logs:
 			run.log_event(str(line))
@@ -1105,7 +1112,8 @@ func _tribute_preview() -> String:
 
 func _show_results() -> void:
 	_desk_phase = "table"
-	var title: String = "Round %d  ·  stake %d" % [run.round_n, run.stake()]
+	var title: String = "Round %d  ·  ante %d  ·  stake %d  ·  rank+%s" % [
+		run.round_n, run.ante(), run.stake(), NumFormat.compact(run.rank_bonus())]
 	var log_text: String = "\n".join(run.trade_log) if not run.trade_log.is_empty() else ""
 	var acts: Array = [] if _is_hotseat() else run.result_action_ids_of(_view_seat)
 	_results.present_round(title, _results_rows(), _tribute_preview(), log_text, acts, true)
@@ -1237,14 +1245,10 @@ func _toggle_trade_pick(card: CardData) -> void:
 	_sync_hand()
 
 func _show_run_over() -> void:
-	var winner: String = ""
-	if run.run_won:
-		var live: Array = run.living_seats()
-		winner = run.name_of(int(live[0])) if not live.is_empty() else run.name_of(_view_seat)
-	var title: String = ("%s HOLDS THE OVAL" % winner) if run.run_won else "REMOVED FROM OFFICE"
-	var body: String = "%s lasted %d round(s). Gold in pocket: %d.\n%s" % [
-		run.name_of(_view_seat), run.round_n, run.gold_of(_view_seat),
-		"Last seat standing." if run.run_won else "The humans are out. The cabinet remains."]
+	var best: int = RunManager.load_best_round()
+	var title: String = "REMOVED FROM OFFICE"
+	var body: String = "%s reached round %d (ante %d).\nGold in pocket: %d. Best run: round %d.\nThe cabinet outlasted you — there is no final win." % [
+		run.name_of(_view_seat), run.round_n, run.ante(), run.gold_of(_view_seat), best]
 	_results.present_game_over(title, _results_rows(), body)
 
 func _show_overlay(title_text: String, body: String, actions: Array) -> void:
@@ -1278,8 +1282,9 @@ func _refresh_hud() -> void:
 	var role_bit: String = "  %s" % role if not run.living_finish().is_empty() else ""
 	var bind: String = run.rank_mod_short(_view_seat)
 	var s: int = _view_seat
-	_hud.text = "%s  Round %d  Stake %d  HP %d/%d  Gold %d  Living %d%s%s" % [
-		run.name_of(s), run.round_n, run.stake(), int(run.hp[s]), int(run.seat_max_hp[s]), run.gold_of(s), run.living_seats().size(), role_bit, bind]
+	_hud.text = "%s  R%d  Ante %d  Stake %d  Rank+%s  HP %d/%d  $%d  Live %d%s%s" % [
+		run.name_of(s), run.round_n, run.ante(), run.stake(), NumFormat.compact(run.rank_bonus()),
+		int(run.hp[s]), int(run.seat_max_hp[s]), run.gold_of(s), run.living_seats().size(), role_bit, bind]
 
 func _set_buttons() -> void:
 	var yours: bool = game.current_player == _view_seat and _is_human(_view_seat) and not game.round_over and not _busy and not _trade_waiting
