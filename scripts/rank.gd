@@ -39,3 +39,38 @@ static func president_power(rank: int) -> int:
 
 static func is_bomb(rank: int) -> bool:
 	return rank == 2
+
+## Map a follow-power number back to a face label. 16+ is a bomb with extra
+## weight (Heavier Bombs) — there is no rank above 2, so that reads "2+".
+static func short_label_for_power(p: int) -> String:
+	if p >= 16:
+		return "2+"
+	if p == 15:
+		return "2"
+	if p == 14:
+		return "A"
+	if p >= 1 and p <= 13:
+		return short_label(p)
+	return str(p)
+
+## Face vs effective follow value. `power_bonus` is the seat-scoped +power bind
+## (Strong Fives, Ace Authority, …). Promotions/Forge are the card's origin_rank.
+## `{shown, small, buffed}` — `shown` is the true value; `small` is the printed
+## rank when it differs, so the buff is obvious on a phone.
+static func buff_display(card: CardData, power_bonus: int = 0) -> Dictionary:
+	if card == null:
+		return {"shown": "", "small": "", "buffed": false, "power": 0}
+	var face: int = card.rank
+	var origin: int = card.origin_rank if card.origin_rank > 0 else face
+	var power: int = president_power(face) + maxi(0, power_bonus)
+	var shown: String = short_label_for_power(power)
+	var face_lab: String = short_label(face)
+	var origin_lab: String = short_label(origin)
+	var buffed: bool = power > president_power(origin)
+	var small: String = ""
+	if buffed:
+		if shown != face_lab:
+			small = face_lab
+		elif origin_lab != shown:
+			small = origin_lab
+	return {"shown": shown, "small": small, "buffed": buffed, "power": power}

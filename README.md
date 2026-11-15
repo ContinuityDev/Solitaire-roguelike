@@ -77,6 +77,8 @@ Shop **rank binds** (or an AI specialty) attach an effect to one rank for **one 
 - `power` — +1 follow power when that seat plays the rank (your 5s can equal a 6; theirs do not)
 - `always_legal` — that rank is always a legal follow of the matching count for that seat (Ace Privilege can follow a bomb)
 
+When a card’s **effective follow value is higher than its printed rank**, the face shows that true value **in blue** instead of the printed rank. Unbuffed cards keep red/black. This fires for seat-scoped `power` binds (Strong Fives → blue 6, Ace Authority → blue 2, Kingmaker → blue A, Heavier Bombs → blue 2+), **Incumbent** / **Rally** promotions (3→4 reads as a blue 4), and **Forge Bomb** (the new 2 is blue). `gold_play` and `always_legal` do not recolor — they are not a higher value.
+
 ## Run it
 
 Godot 4.3. Open `project.godot`, press Play.

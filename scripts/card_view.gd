@@ -19,9 +19,17 @@ var face_forced_down: bool = false
 var display_size: Vector2 = Vector2(W, H)
 var _last_processed_msec: int = 0
 var _last_tap_msec: int = 0
+## Effective follow value. Set from RankSystem.buff_display (power binds,
+## Incumbent/Rally promotions, Forge). Unbuffed cards leave these empty.
+var shown_value: String = ""
+var printed_hint: String = ""
+var value_buffed: bool = false
+
+const BUFF_BLUE: Color = Color(0.08, 0.42, 0.98)
 
 func _init(p_card: CardData = null, p_size: Vector2 = Vector2(W, H)) -> void:
 	card = p_card
+	_sync_value(0)
 	set_display_size(p_size)
 	mouse_filter = MOUSE_FILTER_STOP
 
@@ -31,9 +39,21 @@ func set_display_size(p_size: Vector2) -> void:
 	size = p_size
 	queue_redraw()
 
-func set_card(p_card: CardData) -> void:
+func set_card(p_card: CardData, power_bonus: int = 0) -> void:
 	card = p_card
+	_sync_value(power_bonus)
 	queue_redraw()
+
+func _sync_value(power_bonus: int = 0) -> void:
+	if card == null:
+		shown_value = ""
+		printed_hint = ""
+		value_buffed = false
+		return
+	var d: Dictionary = RankSystem.buff_display(card, power_bonus)
+	shown_value = str(d.get("shown", ""))
+	printed_hint = str(d.get("small", ""))
+	value_buffed = bool(d.get("buffed", false))
 
 func _gui_input(event: InputEvent) -> void:
 	var is_press: bool = false
@@ -93,15 +113,21 @@ func _draw() -> void:
 	if dimmed:
 		inner_col = Color(0.86, 0.86, 0.88)
 	draw_rect(inner, inner_col, true, -1.0, true)
-	var col: Color = Color(0.72, 0.10, 0.12) if card.is_red() else Color(0.08, 0.10, 0.16)
+	var suit_col: Color = Color(0.72, 0.10, 0.12) if card.is_red() else Color(0.08, 0.10, 0.16)
 	if dimmed:
-		col.a = 0.38
+		suit_col.a = 0.38
 	var s: float = clampf(size.x / W, 0.5, 1.25)
 	var font: Font = get_theme_default_font()
-	var label: String = RankSystem.short_label(card.rank)
-	draw_string(font, Vector2(inner.position.x + 3, inner.position.y + 18.0 * s), label, HORIZONTAL_ALIGNMENT_LEFT, -1, int(22.0 * s), col)
-	_draw_suit(inner.position + Vector2(12.0 * s, 34.0 * s), 8.0 * s, col, card.suit)
-	_draw_suit(inner.position + Vector2(inner.size.x * 0.5, inner.size.y * 0.58), 16.0 * s, col, card.suit)
+	var label: String = shown_value if shown_value != "" else RankSystem.short_label(card.rank)
+	var col: Color = BUFF_BLUE if value_buffed else suit_col
+	if dimmed and value_buffed:
+		col.a = 0.55
+	var rank_size: int = maxi(16, int((24.0 if value_buffed else 22.0) * s))
+	if label.length() > 1:
+		rank_size = maxi(14, int(18.0 * s))
+	draw_string(font, Vector2(inner.position.x + 3, inner.position.y + 18.0 * s), label, HORIZONTAL_ALIGNMENT_LEFT, -1, rank_size, col)
+	_draw_suit(inner.position + Vector2(12.0 * s, 34.0 * s), 8.0 * s, suit_col, card.suit)
+	_draw_suit(inner.position + Vector2(inner.size.x * 0.5, inner.size.y * 0.58), 16.0 * s, suit_col, card.suit)
 	if RankSystem.is_bomb(card.rank):
 		var ribbon: Rect2 = Rect2(rect.position.x, rect.end.y - 16.0 * s, rect.size.x, 14.0 * s)
 		draw_rect(ribbon, Color(0.72, 0.10, 0.12, 0.92), true)
