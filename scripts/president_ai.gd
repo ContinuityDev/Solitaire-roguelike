@@ -5,6 +5,8 @@ extends RefCounted
 ## 1 = balanced, 2 = aggressive (follows with 2s more often).
 
 static func choose(game: PresidentGame, seat: int, personality: int = 1) -> Dictionary:
+	if game.has_passed(seat):
+		return {"pass": true}
 	var legal: Array = game.legal_combos(seat)
 	if legal.is_empty():
 		return {"pass": true}

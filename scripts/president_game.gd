@@ -3,7 +3,10 @@ extends RefCounted
 
 ## One round of President. Seat 0 is the human. Combos are N-of-a-kind
 ## of equal rank. 2s are the highest rank (bombs). Pass is always legal;
-## when every living un-finished player passes, the last player to play leads.
+## once a seat passes they are locked out of the current pile. When every
+## other living un-finished player has passed, the pile ends and the last
+## player to play leads. A joker clears the pile the same way (does not end
+## the round).
 
 const SEATS: int = 6
 
@@ -18,7 +21,8 @@ var trick_printed: int = 0 ## face rank of the cards that hit the table
 var trick_power: int = 0 ## numeric follow power; 0 = no trick
 var trick_count: int = 0
 var trick_player: int = -1
-var passes: int = 0
+var passes: int = 0 ## count of seats in passed_seats (compat / HUD)
+var passed_seats: Array = [] ## seats locked out of the current pile
 var last_play_label: Dictionary = {} # seat -> String
 var skip_seat: int = -1
 var must_pass_seat: int = -1
@@ -45,6 +49,7 @@ func setup(p_living: Array, rng: RandomNumberGenerator, packed: int = 0, favorit
 	trick_count = 0
 	trick_player = -1
 	passes = 0
+	passed_seats.clear()
 	mods = null
 	# packed / favorite / extra_cards are applied per-seat after deal by RunManager.
 	# Keep the args so older call sites still compile; they no longer grant cards.
@@ -182,9 +187,44 @@ func _take_cards(seat: int, rank: int, count: int) -> Array:
 	taken.reverse()
 	return taken
 
+func has_passed(seat: int) -> bool:
+	return passed_seats.has(seat)
+
+## Start a new pile with `leader` on lead. Clears pass lockouts.
+func _begin_new_pile(leader: int) -> void:
+	lead = true
+	trick_rank = 0
+	trick_printed = 0
+	trick_power = 0
+	trick_count = 0
+	trick_player = -1
+	passes = 0
+	passed_seats.clear()
+	current_player = leader
+
+func _all_others_passed() -> bool:
+	if trick_player < 0:
+		return false
+	var remain: Array = _living_unfinished()
+	if remain.size() <= 1:
+		return true
+	for s in remain:
+		if int(s) == trick_player:
+			continue
+		if not passed_seats.has(int(s)):
+			return false
+	return true
+
+func _mark_passed(seat: int) -> void:
+	if not passed_seats.has(seat):
+		passed_seats.append(seat)
+	passes = passed_seats.size()
+
 func play(seat: int, combo: Dictionary) -> Dictionary:
 	if round_over or seat != current_player:
 		return {"ok": false, "reason": "not your turn"}
+	if has_passed(seat):
+		return {"ok": false, "reason": "already passed this pile"}
 	if must_pass_seat == seat:
 		return {"ok": false, "reason": "filibustered"}
 	if not is_legal_combo(combo, seat):
@@ -204,28 +244,23 @@ func play(seat: int, combo: Dictionary) -> Dictionary:
 		power_mult = maxi(1, mods.combo_power_mult(seat, base_rank, count, was_lead, emptied))
 	exec_order = false
 	must_pass_seat = -1
-	trick_player = seat
-	passes = 0
 	if RankSystem.is_joker(rank):
-		# Joker clears the current pile and returns the lead to this seat.
-		# It does NOT dump the hand or end the round.
-		lead = true
-		trick_rank = 0
-		trick_printed = 0
-		trick_power = 0
-		trick_count = 0
+		# Joker = pile clear, same as everyone else having passed.
+		# Does NOT dump the hand or end the round.
 		var jlabel: String = "JOKER — pile cleared"
 		last_play_label[seat] = jlabel
 		history.append({"seat": seat, "rank": rank, "count": 1, "joker": true, "clear": true})
+		_begin_new_pile(seat)
 		if emptied and not finished.has(seat):
 			finished.append(seat)
 			last_play_label[seat] = "OUT %d%s" % [finished.size(), _ord(finished.size())]
 			_check_round_over()
 			if not round_over:
+				# Emptied seat cannot lead the next pile.
 				_next_player()
-		else:
-			current_player = seat
 		return {"ok": true, "label": jlabel, "finished": emptied, "joker": true, "clear": true, "base_rank": base_rank, "count": count, "lead": was_lead}
+	# Normal play: seat becomes trick winner. Passed seats stay locked out.
+	trick_player = seat
 	lead = false
 	trick_printed = rank
 	trick_count = count
@@ -245,8 +280,12 @@ func play(seat: int, combo: Dictionary) -> Dictionary:
 func pass_turn(seat: int) -> Dictionary:
 	if round_over or seat != current_player:
 		return {"ok": false}
+	if lead:
+		return {"ok": false, "reason": "cannot pass on lead"}
+	if has_passed(seat):
+		return {"ok": false, "reason": "already passed this pile"}
 	last_play_label[seat] = "pass"
-	passes += 1
+	_mark_passed(seat)
 	exec_order = false
 	must_pass_seat = -1
 	_advance_after_pass()
@@ -259,6 +298,15 @@ func _advance_after_play() -> void:
 	_check_round_over()
 	if round_over:
 		return
+	# If everyone else already passed before this play, the pile ends immediately
+	# (e.g. last non-passed seat played and emptied, or only they remained).
+	if _all_others_passed():
+		var leader: int = trick_player
+		_begin_new_pile(leader)
+		if finished.has(current_player):
+			_next_player()
+		_check_round_over()
+		return
 	_next_player()
 
 func _advance_after_pass() -> void:
@@ -266,15 +314,10 @@ func _advance_after_pass() -> void:
 	if remain.size() <= 1:
 		_check_round_over()
 		return
-	# Everyone except the trick winner has passed.
-	if passes >= remain.size() - 1 and trick_player >= 0:
-		lead = true
-		trick_rank = 0
-		trick_printed = 0
-		trick_power = 0
-		trick_count = 0
-		passes = 0
-		current_player = trick_player
+	# Everyone except the trick winner has passed → pile ends.
+	if _all_others_passed():
+		var leader: int = trick_player
+		_begin_new_pile(leader)
 		if finished.has(current_player):
 			_next_player()
 		_check_round_over()
@@ -289,14 +332,27 @@ func _next_player() -> void:
 	var idx: int = remain.find(current_player)
 	if idx < 0:
 		idx = 0
-	else:
+	var attempts: int = 0
+	while attempts < remain.size():
 		idx = (idx + 1) % remain.size()
-	current_player = int(remain[idx])
-	if skip_seat == current_player:
-		skip_seat = -1
-		var si: int = remain.find(current_player)
-		idx = (si + 1) % remain.size()
 		current_player = int(remain[idx])
+		attempts += 1
+		if skip_seat == current_player:
+			skip_seat = -1
+			continue
+		# Skip seats that already passed this pile (lockout).
+		if not lead and has_passed(current_player):
+			continue
+		return
+	# Every unfinished seat is locked out — end the pile (same as all others passed).
+	if not lead and trick_player >= 0:
+		var leader: int = trick_player
+		_begin_new_pile(leader)
+		if finished.has(current_player):
+			var remain2: Array = _living_unfinished()
+			if remain2.is_empty():
+				return
+			current_player = int(remain2[0])
 
 func _check_round_over() -> void:
 	var remain: Array = _living_unfinished()
@@ -339,6 +395,7 @@ func pack_public() -> Dictionary:
 		"trick_count": trick_count,
 		"trick_player": trick_player,
 		"passes": passes,
+		"passed_seats": passed_seats.duplicate(),
 		"skip_seat": skip_seat,
 		"must_pass_seat": must_pass_seat,
 		"exec_order": exec_order,
@@ -366,7 +423,10 @@ func apply_replica(d: Dictionary, my_seat: int, my_hand: Array) -> void:
 	trick_power = int(d.get("trick_power", 0))
 	trick_count = int(d.get("trick_count", 0))
 	trick_player = int(d.get("trick_player", -1))
-	passes = int(d.get("passes", 0))
+	passed_seats = []
+	for ps in d.get("passed_seats", []):
+		passed_seats.append(int(ps))
+	passes = passed_seats.size()
 	skip_seat = int(d.get("skip_seat", -1))
 	must_pass_seat = int(d.get("must_pass_seat", -1))
 	exec_order = bool(d.get("exec_order", false))

@@ -702,7 +702,8 @@ func _ai_act() -> void:
 		_lan_push()
 		_continue_turns()
 		return
-	_fire_rank_play(seat, play_base, play_count, was_lead, bool(r.get("finished", false)))
+	if not bool(r.get("joker", false)):
+		_fire_rank_play(seat, play_base, play_count, was_lead, bool(r.get("finished", false)))
 	_message("%s plays %s." % [run.name_of(seat), str(r.get("label", ""))])
 	await _fly_from(origins, combo, seat)
 	_refresh()
@@ -711,6 +712,9 @@ func _ai_act() -> void:
 
 func _on_play() -> void:
 	if game.current_player != _view_seat or not _is_human(_view_seat) or game.round_over:
+		return
+	if game.has_passed(_view_seat):
+		_message("You already passed this pile — wait for the next lead.")
 		return
 	if _is_authority() and _busy:
 		return
@@ -736,7 +740,8 @@ func _on_play() -> void:
 		_message("Illegal play (%s)." % str(r.get("reason", "")))
 		return
 	_selected.clear()
-	_fire_rank_play(_view_seat, base_rank, int(combo["count"]), was_lead, bool(r.get("finished", false)))
+	if not bool(r.get("joker", false)):
+		_fire_rank_play(_view_seat, base_rank, int(combo["count"]), was_lead, bool(r.get("finished", false)))
 	_message("%s plays %s." % [run.name_of(_view_seat), str(r.get("label", ""))])
 	_busy = true
 	await _fly_from(origins, combo, _view_seat)
@@ -746,6 +751,9 @@ func _on_play() -> void:
 
 func _on_pass() -> void:
 	if game.current_player != _view_seat or not _is_human(_view_seat) or game.round_over:
+		return
+	if game.has_passed(_view_seat):
+		_message("You already passed this pile.")
 		return
 	if _is_authority() and _busy:
 		return
@@ -774,10 +782,16 @@ func _on_card_press(view: CardView, _pos: Vector2) -> void:
 		return
 	if _busy or game.current_player != _view_seat:
 		return
+	if game.has_passed(_view_seat):
+		_message("You already passed this pile.")
+		return
 	_select_from_card(view.card, false)
 
 func _on_card_double(view: CardView) -> void:
 	if _busy or game.current_player != _view_seat or view.card == null:
+		return
+	if game.has_passed(_view_seat):
+		_message("You already passed this pile.")
 		return
 	if not game.rank_is_legal(_view_seat, view.card.rank):
 		_select_from_card(view.card, true)
@@ -787,6 +801,9 @@ func _on_card_double(view: CardView) -> void:
 		_on_play()
 
 func _select_from_card(card: CardData, for_play: bool) -> void:
+	if game.has_passed(_view_seat):
+		_message("You already passed this pile.")
+		return
 	var rank: int = card.rank
 	if not game.rank_is_legal(_view_seat, rank):
 		_message("That rank cannot follow %d× %s." % [game.trick_count, game.trick_follow_label()])
@@ -889,7 +906,8 @@ func _pop_pass(seat: int) -> void:
 	)
 
 func _fire_rank_play(seat: int, base_rank: int, count: int = 1, is_lead: bool = false, last_card: bool = false) -> void:
-	if base_rank < 0:
+	# Jokers clear the pile only — never fire rank/combo payouts (and never end the round).
+	if base_rank <= 0 or RankSystem.is_joker(base_rank):
 		return
 	var hand: Array = game.hand_of(seat)
 	var res: Dictionary = run.trigger_rank_play(seat, base_rank, hand, count, is_lead, last_card)
@@ -1381,8 +1399,9 @@ func _refresh_hud() -> void:
 
 func _set_buttons() -> void:
 	var yours: bool = game.current_player == _view_seat and _is_human(_view_seat) and not game.round_over and not _busy and not _trade_waiting
-	_play_btn.disabled = not yours
-	_pass_btn.disabled = not yours or game.lead
+	var locked_out: bool = game.has_passed(_view_seat)
+	_play_btn.disabled = not yours or locked_out
+	_pass_btn.disabled = not yours or game.lead or locked_out
 
 func _refresh() -> void:
 	if not _playing():
@@ -1424,7 +1443,11 @@ func _sync_ais() -> void:
 		psb.bg_color = Color(0.06, 0.10, 0.16, 0.88)
 		psb.set_corner_radius_all(10)
 		psb.set_border_width_all(3 if game.current_player == seat else 2)
-		if game.current_player == seat:
+		if game.has_passed(seat) and not game.lead:
+			psb.border_color = Color(0.45, 0.48, 0.55)
+			psb.bg_color = Color(0.10, 0.10, 0.12, 0.92)
+			psb.set_border_width_all(2)
+		elif game.current_player == seat:
 			psb.border_color = Color(1.0, 0.85, 0.25)
 			psb.bg_color = Color(0.16, 0.16, 0.08, 0.92)
 		else:
@@ -1462,7 +1485,13 @@ func _sync_ais() -> void:
 			hp.text = ""
 		var role: String = RoleTrade.short_role(RoleTrade.role_of(run.living_finish(), seat))
 		var kind: String = "P" if _is_human(seat) else "AI"
-		last.text = "%s %s  %s%s" % [kind, role, str(game.last_play_label.get(seat, "—")), run.rank_mod_short(seat)]
+		var last_bit: String = str(game.last_play_label.get(seat, "—"))
+		if game.has_passed(seat) and not game.lead:
+			last_bit = "PASSED"
+			last.add_theme_color_override("font_color", Color(0.70, 0.72, 0.78))
+		else:
+			last.add_theme_color_override("font_color", Color(0.85, 0.88, 0.92))
+		last.text = "%s %s  %s%s" % [kind, role, last_bit, run.rank_mod_short(seat)]
 		if game.peek_seat == seat and not _is_human(seat):
 			var bits: Array[String] = []
 			for c2 in game.hand_of(seat):
@@ -1549,6 +1578,7 @@ func _sync_hand() -> void:
 	var positions: Array = plan["positions"]
 	var lift_room: float = 16.0
 	var yours: bool = game.current_player == _view_seat and _is_human(_view_seat) and not _busy and not game.round_over
+	var locked_out: bool = game.has_passed(_view_seat) and not game.lead
 	var picking: bool = _trade_waiting
 	for i in range(n):
 		var card: CardData = hand[i]
@@ -1558,9 +1588,9 @@ func _sync_hand() -> void:
 		cv2.set_effect_badge(run.rank_effect_badge(_view_seat, base_r))
 		cv2.set_display_size(cs)
 		cv2.selected = _trade_picks.has(card) if picking else _selected.has(card)
-		var legal: bool = yours and game.rank_is_legal(_view_seat, card.rank)
+		var legal: bool = yours and not locked_out and game.rank_is_legal(_view_seat, card.rank)
 		cv2.highlighted = picking or (legal and not cv2.selected)
-		cv2.dimmed = yours and not legal and not picking
+		cv2.dimmed = (yours and not legal and not picking) or locked_out
 		var base: Vector2 = positions[i] if i < positions.size() else Vector2.ZERO
 		var lift: float = 16.0 if cv2.selected else (5.0 if cv2.highlighted else 0.0)
 		var dest: Vector2 = Vector2(base.x, base.y + lift_room - lift)
@@ -1780,6 +1810,8 @@ func _sync_run_from_lobby() -> void:
 func _host_remote_play(seat: int, rank: int, count: int) -> void:
 	if game.current_player != seat or not _is_human(seat) or game.round_over:
 		return
+	if game.has_passed(seat):
+		return
 	var combo: Dictionary = {"rank": rank, "count": count}
 	if not game.is_legal_combo(combo, seat):
 		return
@@ -1789,7 +1821,8 @@ func _host_remote_play(seat: int, rank: int, count: int) -> void:
 	var r: Dictionary = game.play(seat, combo)
 	if not bool(r.get("ok", false)):
 		return
-	_fire_rank_play(seat, play_base, count, was_lead, bool(r.get("finished", false)))
+	if not bool(r.get("joker", false)):
+		_fire_rank_play(seat, play_base, count, was_lead, bool(r.get("finished", false)))
 	_message("%s plays %s." % [run.name_of(seat), str(r.get("label", ""))])
 	_lan_wait.clear()
 	_busy = true
@@ -1801,7 +1834,7 @@ func _host_remote_play(seat: int, rank: int, count: int) -> void:
 func _host_remote_pass(seat: int) -> void:
 	if game.current_player != seat or not _is_human(seat) or game.round_over:
 		return
-	if game.lead:
+	if game.lead or game.has_passed(seat):
 		return
 	game.pass_turn(seat)
 	_pop_pass(seat)

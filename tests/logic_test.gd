@@ -420,39 +420,51 @@ func _init() -> void:
 	_check(gblue.is_legal_combo(ai_blue["combo"], 1), "AI follow of a blue trick is legal")
 	rmod.free()
 
-	# Joker: always legal; clears the pile and returns the lead — does NOT end the round.
+	# Joker: always legal; clears the pile (like everyone passed) — does NOT end the round.
 	var gj: PresidentGame = PresidentGame.new()
-	gj.living = [0, 1, 2]
+	gj.living = [0, 1, 2, 3, 4, 5]
 	gj.hands = {
-		0: [CardData.new(RankSystem.JOKER, 0, true), CardData.new(4, 0, true)],
+		0: [CardData.new(RankSystem.JOKER, 0, true), CardData.new(4, 0, true), CardData.new(5, 0, true)],
 		1: [CardData.new(7, 0, true), CardData.new(8, 0, true)],
-		2: [CardData.new(3, 0, true)],
+		2: [CardData.new(3, 0, true), CardData.new(6, 0, true)],
+		3: [CardData.new(9, 0, true)],
+		4: [CardData.new(10, 0, true)],
+		5: [CardData.new(11, 0, true)],
 	}
+	gj.current_player = 1
+	gj.lead = true
+	var lead_ok: Dictionary = gj.play(1, {"rank": 7, "count": 1})
+	_check(bool(lead_ok.get("ok", false)), "AI can lead before joker test")
+	gj.pass_turn(2)
+	gj.pass_turn(3)
+	_check(gj.has_passed(2) and gj.has_passed(3), "passers are locked out of the pile")
 	gj.current_player = 0
-	gj.lead = false
-	gj.trick_rank = 10
-	gj.trick_count = 1
-	gj.trick_power = 10
-	gj.trick_printed = 10
 	_check(gj.is_legal_combo({"rank": RankSystem.JOKER, "count": 1}, 0), "a single joker is always legal")
 	var pj: Dictionary = gj.play(0, {"rank": RankSystem.JOKER, "count": 1})
 	_check(bool(pj.get("joker", false)) and bool(pj.get("ok", false)), "joker play is flagged")
 	_check(bool(pj.get("clear", false)), "joker clears the pile")
 	_check(not gj.round_over, "joker does not end the round")
 	_check(gj.finished.is_empty(), "joker does not finish the seat when cards remain")
-	_check(gj.hand_of(0).size() == 1, "joker only removes itself; rest of hand stays")
+	_check(gj.hand_of(0).size() == 2, "joker only removes itself; rest of hand stays")
+	_check(gj.hand_of(1).size() == 1, "other hands untouched by joker")
 	_check(gj.lead and gj.trick_count == 0 and gj.trick_power == 0, "pile cleared; seat has the lead")
 	_check(gj.current_player == 0, "joker player keeps the lead")
+	_check(gj.passed_seats.is_empty(), "joker clears pass lockouts for the new pile")
+	_check(not gj.has_passed(2), "previous passers can play on the next pile")
+	# Mid-round joker with six seats still living must not trigger round_over.
+	_check(gj.active_seats().size() == 6, "all seats still active after joker")
 	# Follow-joker as last card: seat finishes, but round continues if others remain.
 	gj.lead = false
 	gj.round_over = false
 	gj.finished.clear()
+	gj.passed_seats.clear()
 	gj.hands[1] = [CardData.new(RankSystem.JOKER, 1, true)]
 	gj.hands[0] = [CardData.new(4, 0, true)]
 	gj.hands[2] = [CardData.new(3, 0, true)]
 	gj.trick_rank = 10
 	gj.trick_count = 2
 	gj.trick_power = 10
+	gj.trick_player = 0
 	gj.current_player = 1
 	_check(gj.is_legal_combo({"rank": RankSystem.JOKER, "count": 1}, 1), "joker can follow any trick")
 	var pj2: Dictionary = gj.play(1, {"rank": RankSystem.JOKER, "count": 1})
@@ -460,6 +472,85 @@ func _init() -> void:
 	_check(not gj.round_over, "follow-joker does not end the round while others remain")
 	_check(gj.finished.size() == 1 and int(gj.finished[0]) == 1, "only the joker seat finished")
 	_check(gj.lead and gj.trick_count == 0, "follow-joker still clears the pile")
+
+	# Pass lockout: once you pass, you cannot play again until the pile ends.
+	var gp: PresidentGame = PresidentGame.new()
+	gp.living = [0, 1, 2, 3]
+	gp.hands = {
+		0: [CardData.new(5, 0, true), CardData.new(9, 0, true)],
+		1: [CardData.new(6, 0, true), CardData.new(8, 0, true)],
+		2: [CardData.new(7, 0, true), CardData.new(10, 0, true)],
+		3: [CardData.new(4, 0, true), CardData.new(11, 0, true)],
+	}
+	gp.current_player = 0
+	gp.lead = true
+	gp.play(0, {"rank": 5, "count": 1})
+	_check(gp.current_player == 1 and not gp.lead, "after lead, next seat follows")
+	gp.pass_turn(1)
+	_check(gp.has_passed(1), "seat 1 is locked out after pass")
+	_check(gp.current_player == 2, "turn advances past passer")
+	# Seat 2 plays over — seat 1 stays locked out.
+	gp.play(2, {"rank": 7, "count": 1})
+	_check(gp.trick_player == 2, "seat 2 is the new trick winner")
+	_check(gp.has_passed(1), "passer stays locked after someone else plays")
+	var locked_play: Dictionary = gp.play(1, {"rank": 6, "count": 1})
+	_check(not bool(locked_play.get("ok", true)), "passed seat cannot play again this pile")
+	# Force current to seat 1 and ensure play still rejected / next_player skips them.
+	gp.current_player = 1
+	var locked_play2: Dictionary = gp.play(1, {"rank": 8, "count": 1})
+	_check(not bool(locked_play2.get("ok", true)), "passed seat rejected even if current_player forced")
+	gp.current_player = 3
+	gp.pass_turn(3)
+	_check(gp.has_passed(3), "seat 3 passed")
+	# Seat 0 still to act (or already past). Advance: only non-passed seats play.
+	# Remaining non-passed besides trick_player(2): seat 0. Seat 1 and 3 passed.
+	if gp.current_player != 0 and not gp.lead:
+		# Keep passing/playing until pile ends or seat 0's turn.
+		if gp.current_player == 0:
+			pass
+		elif not gp.has_passed(gp.current_player) and gp.current_player != 2:
+			gp.pass_turn(gp.current_player)
+	# Ensure seat 0 can still act, then pass → pile should end (1 and 3 already passed).
+	if not gp.lead:
+		gp.current_player = 0
+		gp.pass_turn(0)
+	_check(gp.lead, "pile ends when every other seat has passed")
+	_check(gp.current_player == 2, "last player to play leads the next pile")
+	_check(gp.passed_seats.is_empty(), "new pile clears pass lockouts")
+	_check(not gp.has_passed(1), "previous passers unlocked on new pile")
+	# AI respects lockout: choose returns pass when already passed.
+	gp.passed_seats = [1]
+	gp.lead = false
+	gp.trick_player = 2
+	gp.trick_count = 1
+	gp.trick_power = 7
+	var ai_locked: Dictionary = PresidentAI.choose(gp, 1, 1)
+	_check(bool(ai_locked.get("pass", false)), "AI passes when locked out of the pile")
+	# After a pass, turn never returns to that seat until the pile ends.
+	var gs: PresidentGame = PresidentGame.new()
+	gs.living = [0, 1, 2, 3]
+	gs.hands = {
+		0: [CardData.new(3, 0, true), CardData.new(9, 0, true)],
+		1: [CardData.new(5, 0, true), CardData.new(10, 0, true)],
+		2: [CardData.new(6, 0, true), CardData.new(11, 0, true)],
+		3: [CardData.new(7, 0, true), CardData.new(12, 0, true)],
+	}
+	gs.current_player = 0
+	gs.lead = true
+	gs.play(0, {"rank": 3, "count": 1})
+	gs.pass_turn(1)
+	_check(gs.has_passed(1), "seat 1 locked after pass")
+	# Seat 2 plays, then seat 3 — seat 1 must never become current while still locked.
+	gs.play(2, {"rank": 6, "count": 1})
+	_check(gs.current_player != 1, "locked seat skipped after another play")
+	gs.pass_turn(3)
+	_check(gs.current_player != 1, "locked seat skipped after later pass")
+	_check(gs.has_passed(1), "seat 1 still locked until pile ends")
+	# Seat 0 passes → everyone else passed → pile ends, seat 2 leads.
+	if gs.current_player == 0:
+		gs.pass_turn(0)
+	_check(gs.lead and gs.current_player == 2, "pile ends for last player who played")
+	_check(not gs.has_passed(1), "lockouts clear on the new pile")
 
 	var phone_h: Dictionary = HandLayout.plan(13, 360.0, Vector2(70, 98))
 	_check(bool(phone_h["fits"]), "13 cards stay on a phone-width row")
