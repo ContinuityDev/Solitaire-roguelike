@@ -7,15 +7,17 @@ signal solo_pressed
 signal lobby_pressed
 signal join_pressed
 
-func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+func _init() -> void:
+	UiPin.full_rect(self)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	z_index = 40
 	var bg: ColorRect = ColorRect.new()
-	bg.color = Color(0.04, 0.05, 0.10, 0.97)
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color(0.04, 0.05, 0.10, 1.0)
+	UiPin.full_rect(bg)
+	bg.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(bg)
 	var felt: _TitleFelt = _TitleFelt.new()
-	felt.set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiPin.full_rect(felt)
 	felt.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(felt)
 	var pad: MarginContainer = MarginContainer.new()
@@ -23,7 +25,7 @@ func _ready() -> void:
 	pad.add_theme_constant_override("margin_right", 22)
 	pad.add_theme_constant_override("margin_top", 36)
 	pad.add_theme_constant_override("margin_bottom", 24)
-	pad.set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiPin.full_rect(pad)
 	add_child(pad)
 	var col: VBoxContainer = VBoxContainer.new()
 	col.add_theme_constant_override("separation", 12)
@@ -64,6 +66,9 @@ func _ready() -> void:
 	foot.add_theme_font_size_override("font_size", 11)
 	foot.add_theme_color_override("font_color", Color(0.55, 0.58, 0.64))
 	col.add_child(foot)
+
+func _enter_tree() -> void:
+	UiPin.full_rect(self)
 
 func _mode_btn(name_text: String, desc: String, on_press: Callable) -> PanelContainer:
 	var wrap: PanelContainer = PanelContainer.new()

@@ -22,19 +22,21 @@ var _lan_lab: Label
 var _title_lab: Label
 var _hint: Label
 
-func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+func _init() -> void:
+	UiPin.full_rect(self)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	z_index = 40
 	var bg: ColorRect = ColorRect.new()
-	bg.color = Color(0.04, 0.06, 0.12, 0.98)
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color(0.04, 0.06, 0.12, 1.0)
+	UiPin.full_rect(bg)
+	bg.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(bg)
 	var pad: MarginContainer = MarginContainer.new()
 	pad.add_theme_constant_override("margin_left", 14)
 	pad.add_theme_constant_override("margin_right", 14)
 	pad.add_theme_constant_override("margin_top", 16)
 	pad.add_theme_constant_override("margin_bottom", 12)
-	pad.set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiPin.full_rect(pad)
 	add_child(pad)
 	var col: VBoxContainer = VBoxContainer.new()
 	col.add_theme_constant_override("separation", 8)
@@ -135,6 +137,9 @@ func _ready() -> void:
 	_start_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_start_btn.pressed.connect(_on_start)
 	btns.add_child(_start_btn)
+
+func _enter_tree() -> void:
+	UiPin.full_rect(self)
 
 func present(fresh: bool = true, as_lan: bool = false) -> void:
 	lan_host = as_lan
