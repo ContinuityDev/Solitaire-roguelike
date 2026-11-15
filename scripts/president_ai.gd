@@ -96,7 +96,9 @@ static func choose_shop(offers: Array, gold: int, personality: int, role: String
 			score += 5
 		if RankModDB.is_mod(id):
 			score += 5
-		if id == "forge" or id == "rally":
+		if ComboBuffDB.is_combo(id):
+			score += 5
+		if id == "incumbent" or id == "forge" or id == "rally":
 			score += 4
 		if id == "veto" or id == "filibuster" or id == "tax":
 			score += 4

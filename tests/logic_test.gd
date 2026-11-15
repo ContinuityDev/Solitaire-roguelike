@@ -385,10 +385,11 @@ func _init() -> void:
 	rmod.bind_rank_mod(0, 5, "gold_play")
 	_check(rmod.rank_gold_on_play(0, 5) == 1, "player earns gold on 5s")
 	_check(rmod.rank_gold_on_play(1, 5) == 0, "AI without gold-5s earns nothing on 5s")
-	_check(str(RankModDB.AI_SPEC[1]["effect"]) != "", "Speaker has a starter specialty")
+	_check(str(RankModDB.AI_SPEC[1]["effect"]) != "", "Speaker specialty table still exists for tooling")
 	var spec_run: RunManager = RunManager.new()
 	spec_run.start_new_run()
-	_check(spec_run.rank_mods_of(1).size() >= 1, "AI seats start with a rank bind")
+	_check(spec_run.rank_mods_of(1).is_empty(), "AI seats start round 1 with no rank bind")
+	_check(spec_run.upgrades_of(1).is_empty() and spec_run.actions_of(1).is_empty(), "AI seats start round 1 with no upgrades")
 	_check(spec_run.rank_mods_of(0).is_empty(), "human starts with no rank bind")
 	spec_run.gold = 20
 	_check(spec_run.buy_upgrade("mod_gold_5", 8), "human can buy a rank bind")
@@ -685,6 +686,7 @@ func _init() -> void:
 			bought = true
 	_check(bought, "an AI inventory is no longer empty after shopping")
 	_check(ai_run.gold_of(1) < 40, "AI gold was spent")
+	_check(ai_run.loadout_short(1) != "" or bought, "AI loadout badge reflects purchases")
 	ai_run.actions_of(2).append("filibuster")
 	var g_fili: PresidentGame = PresidentGame.new()
 	g_fili.living = [0, 1, 2]
@@ -901,18 +903,33 @@ func _init() -> void:
 	_check(scale_run.stake() == 6, "round 1 stake is 5+1")
 	scale_run.round_n = 4
 	_check(scale_run.ante() == 2, "round 4 is ante 2")
-	_check(scale_run.rank_bonus() == 3 + int(9 / 6), "round 4 rank bonus formula")
+	_check(scale_run.rank_bonus() == 0, "automatic rank bonus stays 0 in later rounds")
 	_check(scale_run.stake() == 5 + 4 + 3, "round 4 stake adds ante pressure")
 	scale_run.round_n = 10
-	_check(scale_run.rank_bonus() == 9 + int(81 / 6), "round 10 rank bonus accelerates")
-	_check(scale_run.rank_bonus() >= 20, "mid-run bonus is meaningful")
+	_check(scale_run.rank_bonus() == 0, "no mid-run automatic rank inflation")
 	_check(scale_run.stake() == 5 + 10 + 9 + 2, "round 10 stake adds late tax")
 	scale_run.round_n = 40
-	_check(scale_run.rank_bonus() >= 200, "late-run bonus is huge")
-
+	_check(scale_run.rank_bonus() == 0, "late-run automatic rank inflation remains off")
+	# Manual inflate helpers still work for Incumbent / blue-value tooling.
 	rng.seed = 99
 	var g_inf: PresidentGame = PresidentGame.new()
 	g_inf.setup([0, 1, 2, 3, 4, 5], rng)
+	var faces_r1: Array = []
+	for c_r1 in g_inf.hand_of(0):
+		faces_r1.append((c_r1 as CardData).rank)
+	# apply_deal_effects must NOT auto-inflate across rounds.
+	scale_run.round_n = 1
+	scale_run.apply_deal_effects(g_inf)
+	var faces_after: Array = []
+	for c_r1b in g_inf.hand_of(0):
+		faces_after.append((c_r1b as CardData).rank)
+	_check(faces_r1 == faces_after, "deal effects do not auto-inflate ranks in round 1")
+	scale_run.round_n = 12
+	scale_run.apply_deal_effects(g_inf)
+	var faces_late: Array = []
+	for c_late in g_inf.hand_of(0):
+		faces_late.append((c_late as CardData).rank)
+	_check(faces_r1 == faces_late, "deal effects do not auto-inflate ranks in later rounds")
 	Deck.inflate_hands(g_inf.hands, 12)
 	var saw_super: bool = false
 	var min_p: int = 999999
@@ -926,8 +943,8 @@ func _init() -> void:
 				min_p = pp
 			if RankSystem.is_super(rr):
 				saw_super = true
-	_check(saw_super, "deal inflation produces super ranks")
-	_check(min_p >= 3 + 12, "inflation lifts the floor by the bonus")
+	_check(saw_super, "manual inflate helper still produces super ranks")
+	_check(min_p >= 3 + 12, "manual inflate lifts the floor by the bonus")
 	g_inf.lead = true
 	g_inf.current_player = 0
 	var any_rank: int = 0
@@ -936,6 +953,34 @@ func _init() -> void:
 			any_rank = (c0 as CardData).rank
 			break
 	_check(g_inf.is_legal_combo({"rank": any_rank, "count": 1}, 0), "super/inflated ranks are legal on lead")
+
+	# AI shop timing: vanilla round 1, buys after desk opens (post round 1).
+	var ai_scale: RunManager = RunManager.new()
+	ai_scale.start_new_run()
+	ai_scale.rng.seed = 11
+	for seat_r1 in range(1, 6):
+		_check(ai_scale.upgrades_of(seat_r1).is_empty() and ai_scale.rank_mods_of(seat_r1).is_empty() \
+			and ai_scale.actions_of(seat_r1).is_empty() and ai_scale.enhancements_of(seat_r1).is_empty(),
+			"AI seat %d has zero upgrades in round 1" % seat_r1)
+	ai_scale.apply_payouts([0, 1, 2, 3, 4, 5])
+	for seat_fund in range(1, 6):
+		ai_scale.seat_gold[seat_fund] = maxi(ai_scale.gold_of(seat_fund), 30)
+	var gold_before_shop: Dictionary = {}
+	for seat_snap in range(1, 6):
+		gold_before_shop[seat_snap] = ai_scale.gold_of(seat_snap)
+	var shop2: Array = ai_scale.open_shop_phase()
+	_check(shop2.size() >= 1, "AIs buy after round 1 desk opens (%d logs)" % shop2.size())
+	var any_ai_gear: bool = false
+	var any_spent: bool = false
+	for seat_bought in range(1, 6):
+		if not ai_scale.upgrades_of(seat_bought).is_empty() or not ai_scale.rank_mods_of(seat_bought).is_empty() \
+			or not ai_scale.actions_of(seat_bought).is_empty() or not ai_scale.enhancements_of(seat_bought).is_empty():
+			any_ai_gear = true
+		if ai_scale.gold_of(seat_bought) < int(gold_before_shop[seat_bought]):
+			any_spent = true
+	_check(any_ai_gear, "at least one AI acquired upgrades after round 1")
+	_check(any_spent, "AIs spend gold on their desk")
+	ai_scale.free()
 
 	var lose_run: RunManager = RunManager.new()
 	lose_run.start_new_run()

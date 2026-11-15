@@ -194,7 +194,7 @@ func start_new_run(config = null) -> void:
 			hp.append(START_HP)
 		else:
 			hp.append(0)
-	_grant_ai_specialties()
+	# AIs start vanilla in round 1 — no free specialty binds. They buy after round 1.
 	whip_used = false
 	last_payout.clear()
 	last_first = 0
@@ -217,9 +217,12 @@ func start_new_run(config = null) -> void:
 	run_won = false
 	changed.emit()
 
-func _grant_ai_specialties() -> void:
+## Optional legacy helper: grant the old free AI specialty binds (tests / tooling).
+func grant_ai_specialties() -> void:
 	for seat in range(seat_count):
 		if not is_ai(seat):
+			continue
+		if not rank_mods_of(seat).is_empty():
 			continue
 		var spec: Dictionary = {}
 		if RankModDB.AI_SPEC.has(seat):
@@ -248,14 +251,10 @@ func stake() -> int:
 	var late: int = int((round_n - 1) / 5) * 2
 	return 5 + round_n + (ante() - 1) * 3 + late
 
-## Follow-power added to every dealt card this round (physical rank inflation).
-## Round 1 → 0; accelerates so faces hit K/M while stake climbs faster than economy.
-## Round 2 → 1, Round 5 → 7, Round 10 → 24, Round 20 → 82, Round 40 → 299, …
+## Automatic per-round rank inflation is disabled. Ranks only change via
+## upgrades / binds / Incumbent / combos. Kept as 0 for HUD + legacy call sites.
 func rank_bonus() -> int:
-	var r: int = round_n - 1
-	if r <= 0:
-		return 0
-	return r + int((r * r) / 6)
+	return 0
 
 func gold_of(seat: int) -> int:
 	_ensure_seat_arrays()
@@ -657,6 +656,43 @@ func combo_short(seat: int) -> String:
 		bits.append(" " + ComboBuffDB.short_label(buff, int(buff.get("level", 1))))
 	return "".join(bits)
 
+## Compact badge list of a seat's upgrades / binds / actions for AI plaques.
+func loadout_short(seat: int) -> String:
+	var bits: PackedStringArray = PackedStringArray()
+	var mod: String = rank_mod_short(seat).strip_edges()
+	if mod != "":
+		bits.append(mod)
+	var combo: String = combo_short(seat).strip_edges()
+	if combo != "":
+		bits.append(combo)
+	for id in upgrades_of(seat):
+		var sid: String = str(id)
+		if ComboBuffDB.is_combo(sid):
+			continue
+		var info: Dictionary = UpgradeDB.get_by_id(sid)
+		var lab: String = str(info.get("icon", info.get("name", sid)))
+		if lab != "" and not bits.has(lab):
+			bits.append(lab)
+		if bits.size() >= 4:
+			break
+	for id2 in actions_of(seat):
+		var ainfo: Dictionary = ActionDB.get_by_id(str(id2))
+		var alab: String = str(ainfo.get("icon", ainfo.get("name", id2)))
+		if alab != "" and not bits.has(alab):
+			bits.append(alab)
+		if bits.size() >= 5:
+			break
+	for id3 in enhancements_of(seat):
+		var einfo: Dictionary = EnhancementDB.get_by_id(str(id3))
+		var elab: String = str(einfo.get("icon", einfo.get("name", id3)))
+		if elab != "" and not bits.has(elab):
+			bits.append(elab)
+		if bits.size() >= 5:
+			break
+	if bits.is_empty():
+		return ""
+	return " [" + " ".join(bits) + "]"
+
 ## Fire rank customizations + combo buffs when a seat plays.
 ## `base_rank` is the deal-face. Returns {gold, chips, damage, heal, logs, target, retriggers, mult}.
 func trigger_rank_play(seat: int, base_rank: int, hand: Array = [], count: int = 1, is_lead: bool = false, last_card: bool = false) -> Dictionary:
@@ -1052,34 +1088,43 @@ func ai_shop_all() -> Array:
 	var logs: Array = []
 	if not shop_phase:
 		return logs
+	# Round 1 desk opens after the first deal's results — that is the first time
+	# AIs may buy. They start the run with zero upgrades.
 	for seat in range(SEATS):
 		if not is_alive(seat) or is_human(seat):
 			continue
-		var offers: Array = ShopStock.draw_offers(rng, self, ShopStock.AI_SLOTS, seat)
-		var priced: Array = []
-		for o in offers:
-			# AIs only spend gold — skip chip-priced customizations / combos / economy.
-			var oid: String = str(o.get("id", ""))
-			if UpgradeDB.currency_of(o) == "chips" or RankEffectDB.is_rank_fx(oid) or ComboBuffDB.is_combo(oid):
-				continue
-			priced.append(priced_copy_of(seat, o))
-		if priced.is_empty():
-			continue
-		var role: String = RoleTrade.role_of(last_finish, seat)
-		var pick: Dictionary = PresidentAI.choose_shop(priced, gold_of(seat), seat % 3, role)
-		if pick.is_empty():
-			continue
-		var id: String = str(pick.get("id", ""))
-		var price: int = int(pick.get("price", 0))
-		var ok: bool = false
-		match str(pick.get("kind", "upgrade")):
-			"action":
-				ok = buy_action_for(seat, id, price)
-			"enhancement":
-				ok = buy_enhancement_for(seat, id, price)
-			_:
-				ok = buy_upgrade_for(seat, id, price)
-		if ok:
+		# Up to two gold buys per desk so AIs scale across the run.
+		for _buy_i in range(2):
+			var offers: Array = ShopStock.draw_offers(rng, self, ShopStock.AI_SLOTS, seat)
+			var priced: Array = []
+			for o in offers:
+				# AIs only spend gold (no Survivor Chips). Gold combos / rank mods OK.
+				if UpgradeDB.currency_of(o) == "chips":
+					continue
+				var oid: String = str(o.get("id", ""))
+				if RankEffectDB.is_rank_fx(oid):
+					continue
+				priced.append(priced_copy_of(seat, o))
+			if priced.is_empty():
+				break
+			var role: String = RoleTrade.role_of(last_finish, seat)
+			var pick: Dictionary = PresidentAI.choose_shop(priced, gold_of(seat), seat % 3, role)
+			if pick.is_empty():
+				break
+			var id: String = str(pick.get("id", ""))
+			var price: int = int(pick.get("price", 0))
+			var ok: bool = false
+			match str(pick.get("kind", "upgrade")):
+				"action":
+					ok = buy_action_for(seat, id, price)
+				"enhancement":
+					ok = buy_enhancement_for(seat, id, price)
+				"combo":
+					ok = buy_upgrade_for(seat, id, price)
+				_:
+					ok = buy_upgrade_for(seat, id, price)
+			if not ok:
+				break
 			var line: String = "%s buys %s ($%d). Gold left $%d." % [name_of(seat), str(pick.get("name", id)), price, gold_of(seat)]
 			logs.append(line)
 			log_event(line)
@@ -1087,11 +1132,7 @@ func ai_shop_all() -> Array:
 
 func apply_deal_effects(game: PresidentGame) -> Array:
 	var logs: Array = []
-	var bonus: int = rank_bonus()
-	if bonus > 0:
-		Deck.inflate_hands(game.hands, bonus)
-		Deck.inflate_card_list(game.kitty, bonus)
-		logs.append("Rank inflation +%s (ante %d)." % [NumFormat.compact(bonus), ante()])
+	# No automatic rank inflation — faces stay classic unless upgrades change them.
 	for seat in game.living:
 		var s: int = int(seat)
 		Deck._apply_packed(game.hands, s, packed_level_of(s), rng)
