@@ -1,5 +1,10 @@
 # Solitaire Roguelike
 
+This here is a very small game with the purpose of helping me (a lowly developer ik) decide whether or not to actually follow through with this idea, whether it is a good one or just genuinely trash so I made a small game with ai to see if its worth investing time into
+
+
+
+
 > **▶ Play in your browser:** https://continuitydev.github.io/Solitaire-roguelike/
 >
 > _One-time setup still needed (takes ~30 seconds): repo **Settings → Pages → Branch: `main`, folder: `/docs` → Save**. The link above goes live a few minutes after that — everything it needs is already pushed in `docs/`._
@@ -230,3 +235,5 @@ The Prop Table now always shows a spread: a deck/rank slot (**Raise the Curtain 
 ### Grand Illusions (boss tricks)
 
 Every 3rd act is a **Grand Illusion** (shown in red in the HUD), cycling three stage-villain twists: **Sawed in Half** (Act 3: Hearts finale plays earn half applause), **No Safety Net** (Act 6: no redeals), **Death-Defying Encore** (Act 9, 12, ...: encore bonus only pays at chain 3+).
+
+
