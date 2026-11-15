@@ -9,10 +9,14 @@ var _body: Label
 var _btn: Button
 var _waiting: bool = false
 
+func _enter_tree() -> void:
+	UiPin.full_rect(self)
+
 func _ready() -> void:
 	visible = false
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiPin.full_rect(self)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	z_index = 30
 	var psb: StyleBoxFlat = StyleBoxFlat.new()
 	psb.bg_color = Color(0.04, 0.05, 0.10, 0.96)
 	psb.border_color = Color(0.85, 0.70, 0.28)
@@ -23,7 +27,7 @@ func _ready() -> void:
 	m.add_theme_constant_override("margin_right", 24)
 	m.add_theme_constant_override("margin_top", 24)
 	m.add_theme_constant_override("margin_bottom", 24)
-	m.set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiPin.full_rect(m)
 	add_child(m)
 	var v: VBoxContainer = VBoxContainer.new()
 	v.alignment = BoxContainer.ALIGNMENT_CENTER

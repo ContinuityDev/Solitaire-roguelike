@@ -54,6 +54,7 @@ var _title_btn: Button
 var _net: NetSession
 var _lan_wait: Dictionary = {}
 var _client_shop_open: bool = false
+var _table_layer: Control
 
 const AI_COLORS: Array = [
 	Color(0.55, 0.22, 0.22),
@@ -75,25 +76,32 @@ func _ready() -> void:
 	_show_title()
 
 func _build_ui() -> void:
+	_table_layer = Control.new()
+	_table_layer.name = "TableLayer"
+	UiPin.full_rect(_table_layer)
+	_table_layer.visible = false
+	_table_layer.process_mode = Node.PROCESS_MODE_DISABLED
+	_table_layer.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(_table_layer)
 	var bg: ColorRect = ColorRect.new()
 	bg.color = Color(0.04, 0.06, 0.12)
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(bg)
+	UiPin.full_rect(bg)
+	_table_layer.add_child(bg)
 	_felt = TableFelt.new()
-	_felt.set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiPin.full_rect(_felt)
 	_felt.offset_left = 4
 	_felt.offset_top = 66
 	_felt.offset_right = -4
 	_felt.offset_bottom = -4
 	_felt.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_felt)
+	_table_layer.add_child(_felt)
 	var pad: MarginContainer = MarginContainer.new()
 	pad.add_theme_constant_override("margin_left", 10)
 	pad.add_theme_constant_override("margin_right", 10)
 	pad.add_theme_constant_override("margin_top", 8)
 	pad.add_theme_constant_override("margin_bottom", 8)
-	pad.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(pad)
+	UiPin.full_rect(pad)
+	_table_layer.add_child(pad)
 	var root: VBoxContainer = VBoxContainer.new()
 	root.add_theme_constant_override("separation", 6)
 	pad.add_child(root)
@@ -165,9 +173,9 @@ func _build_ui() -> void:
 	_action_row.add_theme_constant_override("h_separation", 6)
 	root.add_child(_action_row)
 	var shop_holder: CenterContainer = CenterContainer.new()
-	shop_holder.set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiPin.full_rect(shop_holder)
 	shop_holder.visible = false
-	add_child(shop_holder)
+	_table_layer.add_child(shop_holder)
 	_shop = Shop.new()
 	shop_holder.add_child(_shop)
 	_shop.visibility_changed.connect(func() -> void: shop_holder.visible = _shop.visible)
@@ -177,9 +185,9 @@ func _build_ui() -> void:
 	_shop.reroll_pressed.connect(_on_shop_reroll)
 	_shop.closed.connect(_on_shop_closed)
 	var resh: CenterContainer = CenterContainer.new()
-	resh.set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiPin.full_rect(resh)
 	resh.visible = false
-	add_child(resh)
+	_table_layer.add_child(resh)
 	_results = ResultsView.new()
 	resh.add_child(_results)
 	_results.visibility_changed.connect(func() -> void: resh.visible = _results.visible)
@@ -200,7 +208,7 @@ func _build_ui() -> void:
 	tsb.set_border_width_all(2)
 	tsb.set_corner_radius_all(8)
 	_trade_panel.add_theme_stylebox_override("panel", tsb)
-	add_child(_trade_panel)
+	_table_layer.add_child(_trade_panel)
 	var tm: MarginContainer = MarginContainer.new()
 	tm.add_theme_constant_override("margin_left", 12)
 	tm.add_theme_constant_override("margin_right", 12)
@@ -219,9 +227,9 @@ func _build_ui() -> void:
 	_trade_confirm.pressed.connect(_on_trade_confirm_pressed)
 	tv.add_child(_trade_confirm)
 	var ovh: CenterContainer = CenterContainer.new()
-	ovh.set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiPin.full_rect(ovh)
 	ovh.visible = false
-	add_child(ovh)
+	_table_layer.add_child(ovh)
 	_overlay = PanelContainer.new()
 	_overlay.visible = false
 	ovh.add_child(_overlay)
@@ -243,16 +251,16 @@ func _build_ui() -> void:
 	_overlay_buttons = HBoxContainer.new()
 	ov.add_child(_overlay_buttons)
 	_fly_layer = Control.new()
-	_fly_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiPin.full_rect(_fly_layer)
 	_fly_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_fly_layer)
+	_table_layer.add_child(_fly_layer)
 	_ai_timer = Timer.new()
 	_ai_timer.one_shot = true
 	_ai_timer.wait_time = 0.45
 	_ai_timer.timeout.connect(_ai_act)
 	add_child(_ai_timer)
 	_handoff = HandoffView.new()
-	add_child(_handoff)
+	_table_layer.add_child(_handoff)
 	_net = NetSession.new()
 	_net.name = "NetSession"
 	add_child(_net)
@@ -299,6 +307,30 @@ func _local_seat() -> int:
 		return _net.local_seat if _net.local_seat >= 0 else 0
 	return _view_seat
 
+func _playing() -> bool:
+	return _table_layer != null and _table_layer.visible
+
+func _show_screen(which: String) -> void:
+	if _table_layer:
+		var on_table: bool = which == "table"
+		_table_layer.visible = on_table
+		_table_layer.process_mode = Node.PROCESS_MODE_INHERIT if on_table else Node.PROCESS_MODE_DISABLED
+	if _title_view:
+		_title_view.visible = which == "title"
+		if which == "title":
+			move_child(_title_view, get_child_count() - 1)
+			UiPin.full_rect(_title_view)
+	if _lobby_view:
+		_lobby_view.visible = which == "lobby"
+		if which == "lobby":
+			move_child(_lobby_view, get_child_count() - 1)
+			UiPin.full_rect(_lobby_view)
+	if _join_view:
+		_join_view.visible = which == "join"
+		if which == "join":
+			move_child(_join_view, get_child_count() - 1)
+			UiPin.full_rect(_join_view)
+
 func _show_title() -> void:
 	_ai_timer.stop()
 	_busy = false
@@ -314,22 +346,16 @@ func _show_title() -> void:
 		_results.visible = false
 	if _handoff:
 		_handoff.visible = false
-	if _lobby_view:
-		_lobby_view.visible = false
-	if _join_view:
-		_join_view.visible = false
 	if _overlay:
 		_overlay.visible = false
-	if _title_view:
-		_title_view.visible = true
+	_show_screen("title")
 
 func _on_solo() -> void:
 	lobby = LobbyConfig.solo()
-	_title_view.visible = false
 	_begin_play()
 
 func _on_open_lobby() -> void:
-	_title_view.visible = false
+	_show_screen("lobby")
 	_lobby_view.present(true, true)
 	lobby = _lobby_view.config
 	var err: Error = _net.host_listen(lobby, _lobby_view.host_player_name())
@@ -340,7 +366,7 @@ func _on_open_lobby() -> void:
 		_lobby_view.set_lan_status(_net.status)
 
 func _on_open_join() -> void:
-	_title_view.visible = false
+	_show_screen("join")
 	_join_view.present()
 
 func _on_join_connect(ip: String, player_name: String) -> void:
@@ -377,10 +403,7 @@ func _on_net_server_lost() -> void:
 	_show_title()
 
 func _on_net_match_started() -> void:
-	if _join_view:
-		_join_view.visible = false
-	if _title_view:
-		_title_view.visible = false
+	_show_screen("table")
 	_view_seat = _net.local_seat if _net.local_seat >= 0 else 0
 
 func _on_lobby_started(cfg: LobbyConfig) -> void:
@@ -391,10 +414,7 @@ func _on_lobby_started(cfg: LobbyConfig) -> void:
 	_begin_play()
 
 func _begin_play() -> void:
-	_title_view.visible = false
-	_lobby_view.visible = false
-	if _join_view:
-		_join_view.visible = false
+	_show_screen("table")
 	if _is_lan() and _net.is_host:
 		_view_seat = 0
 	else:
@@ -403,7 +423,7 @@ func _begin_play() -> void:
 	_start_round()
 
 func _restart_run() -> void:
-	if _title_view.visible:
+	if not _playing():
 		return
 	if not _is_authority():
 		return
@@ -507,12 +527,7 @@ func _make_ai_plaque(seat: int) -> PanelContainer:
 func _start_round() -> void:
 	if not _is_authority():
 		return
-	if _title_view:
-		_title_view.visible = false
-	if _lobby_view:
-		_lobby_view.visible = false
-	if _join_view:
-		_join_view.visible = false
+	_show_screen("table")
 	if _handoff:
 		_handoff.visible = false
 	_overlay.visible = false
@@ -1200,6 +1215,8 @@ func _message(t: String) -> void:
 	_msg.text = t
 
 func _refresh_hud() -> void:
+	if not _playing():
+		return
 	if _hud == null or run == null or run.hp.is_empty():
 		return
 	var role: String = RoleTrade.role_of(run.living_finish(), _view_seat)
@@ -1215,6 +1232,8 @@ func _set_buttons() -> void:
 	_pass_btn.disabled = not yours or game.lead
 
 func _refresh() -> void:
+	if not _playing():
+		return
 	_refresh_hud()
 	_update_banner()
 	var vw: float = size.x if size.x > 10.0 else 390.0
@@ -1500,9 +1519,7 @@ func _apply_lan_snapshot(data: Dictionary) -> void:
 	if data.has("game") and data["game"] is Dictionary:
 		game.apply_replica(data["game"], _view_seat, data.get("hand", []))
 		game.mods = run
-	_title_view.visible = false
-	_lobby_view.visible = false
-	_join_view.visible = false
+	_show_screen("table")
 	var phase: String = str(data.get("phase", "play"))
 	_message(str(data.get("msg", "")))
 	if _banner:

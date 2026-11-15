@@ -565,6 +565,27 @@ func _init() -> void:
 	nrun.free()
 	nrun2.free()
 
+	var pin_host: Control = Control.new()
+	pin_host.size = Vector2(390, 844)
+	root.add_child(pin_host)
+	var pin_child: Control = Control.new()
+	pin_host.add_child(pin_child)
+	UiPin.full_rect(pin_child)
+	_check(is_equal_approx(pin_child.anchor_right, 1.0) and is_equal_approx(pin_child.anchor_bottom, 1.0), "UiPin stretches anchors to the parent")
+	_check(is_equal_approx(pin_child.offset_left, 0.0) and is_equal_approx(pin_child.offset_right, 0.0), "UiPin zeroes offsets so the layer is not min-sized")
+	var tv: TitleView = TitleView.new()
+	pin_host.add_child(tv)
+	_check(is_equal_approx(tv.anchor_right, 1.0) and is_equal_approx(tv.anchor_bottom, 1.0), "title view pins full-rect")
+	_check(tv.mouse_filter == Control.MOUSE_FILTER_STOP, "title eats clicks instead of passing them to the table")
+	var bg_ok: bool = false
+	for ch in tv.get_children():
+		if ch is ColorRect:
+			bg_ok = is_equal_approx((ch as ColorRect).color.a, 1.0)
+			break
+	_check(bg_ok, "title backdrop is fully opaque")
+	tv.queue_free()
+	pin_host.queue_free()
+
 	run.free()
 	if _failures == 0:
 		print("ALL TESTS PASSED")
