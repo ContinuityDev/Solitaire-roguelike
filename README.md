@@ -3,14 +3,16 @@
 A cabinet shedding game. **Title screen** first — pick a mode:
 
 - **Solo / vs AIs** — you versus five cabinet AIs (the full President run).
-- **Local Lobby** — host 2–6 seats on this device. Mark seats Human or AI. **Hotseat / pass-the-device** (web + desktop). LAN/WebRTC join is not on the Pages build.
+- **Local Lobby** — host 2–6 seats. You are always **player one** (rename yourself). **Hotseat** still works on this device. The gold **4-letter table code** is how someone else sits down from another browser on this same page (WebRTC, peer-to-peer). Empty seats stay AIs.
+- **Join Table** — your name + the host’s table code. Two phones, two tabs, or a friend on the same Wi-Fi. You take the next empty seat. Desktop Godot still also does classic **LAN by IP** (UDP 24567).
 
 Play in the browser once GitHub Pages is on: https://continuitydev.github.io/Solitaire-roguelike/
 
 ### How to start
 1. Open the game. You land on **PRESIDENT / THE CABINET**, not in a run.
 2. **Solo / vs AIs** starts a 6-seat run immediately (you + five AIs). **Title** on the table (or game-over) returns to the menu. **New Run** restarts the same mode.
-3. **Local Lobby** — name and a 4-character code (flavor for the table), **+/– seats** (2–6), each row **Human** or **AI**. Seat 1 is the host (always human). **Empty → AI** fills the rest. **Start** deals. When another human’s turn (or desk) comes up, **Pass the device** covers the cards until they tap **I’m P#**.
+3. **Local Lobby** — table name, **your name** (player one), a **4-letter code**, **+/– seats** (2–6), each row **Human** or **AI**. Seat 1 is the host (always human). **Empty → AI** fills the rest. **Start** deals. Share the code; friends open this same page → **Join Table**. When another *local* human’s turn comes up, **Pass the device** covers the cards until they tap **I’m P#**. Remote joiners play on their own phone — they only see their own hand.
+4. **Join Table** — your name, the host’s 4-letter code, **Sit down**. Wait for the host to Start. If they leave, you drop back to title. If you disconnect mid-run, the host turns your seat into an AI. Signaling uses a public MQTT broker; game traffic is peer-to-peer WebRTC (STUN). Strict mobile NATs may fail without a TURN server — same Wi-Fi is the reliable case.
 
 Last living **human** wins the run. If every human hits 0 HP, the cabinet outlasts you.
 

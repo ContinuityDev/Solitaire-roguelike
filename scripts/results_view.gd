@@ -73,16 +73,17 @@ func _ready() -> void:
 	_title_btn.pressed.connect(func() -> void: visible = false; title_pressed.emit())
 	outer.add_child(_title_btn)
 
-func present_round(title_text: String, rows: Array, preview: String, log_text: String, action_ids: Array) -> void:
+func present_round(title_text: String, rows: Array, preview: String, log_text: String, action_ids: Array, can_continue: bool = true) -> void:
 	_mode = "round"
 	_title.text = title_text
 	_preview.text = preview
 	_log.text = log_text
-	_continue_btn.text = "Continue"
+	_continue_btn.text = "Continue" if can_continue else "Waiting for the host…"
+	_continue_btn.disabled = not can_continue
 	if _title_btn:
 		_title_btn.visible = false
 	_fill_rows(rows)
-	_fill_actions(action_ids)
+	_fill_actions(action_ids if can_continue else [])
 	_size_to_view()
 	visible = true
 
@@ -92,6 +93,7 @@ func present_game_over(title_text: String, rows: Array, body: String) -> void:
 	_preview.text = body
 	_log.text = ""
 	_continue_btn.text = "New Run"
+	_continue_btn.disabled = false
 	if _title_btn:
 		_title_btn.visible = true
 	_fill_rows(rows)

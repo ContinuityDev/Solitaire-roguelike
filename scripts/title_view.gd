@@ -5,6 +5,7 @@ extends Control
 
 signal solo_pressed
 signal lobby_pressed
+signal join_pressed
 
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -51,9 +52,13 @@ func _ready() -> void:
 	spacer.custom_minimum_size = Vector2(0, 18)
 	col.add_child(spacer)
 	col.add_child(_mode_btn("Solo  /  vs AIs", "You versus five cabinet AIs. Same President run as before.", func() -> void: solo_pressed.emit()))
-	col.add_child(_mode_btn("Local Lobby", "Hotseat on this device. 2–6 seats, humans or AIs. Pass the phone.", func() -> void: lobby_pressed.emit()))
+	col.add_child(_mode_btn("Local Lobby", "Host 2–6 seats. You are player one — rename yourself. Share the 4-letter table code. Empty seats stay AIs. Hotseat still works on this device.", func() -> void: lobby_pressed.emit()))
+	col.add_child(_mode_btn("Join Table", "Another browser, same page. Type the host’s table code and your name.", func() -> void: join_pressed.emit()))
 	var foot: Label = Label.new()
-	foot.text = "Web build is pass-the-device. LAN join is not on this export."
+	if NetSession.uses_webrtc():
+		foot.text = "Two phones or two tabs: host a lobby, share the code, Join Table. Peer-to-peer WebRTC — no install."
+	else:
+		foot.text = "Desktop LAN is UDP %d (join by IP). The web page uses a table code instead." % NetSession.PORT
 	foot.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	foot.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	foot.add_theme_font_size_override("font_size", 11)

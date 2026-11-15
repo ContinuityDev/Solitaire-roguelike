@@ -29,3 +29,39 @@ func label() -> String:
 
 func display_name() -> String:
 	return "%s of %s" % [RankSystem.full_name(rank), SUIT_NAMES[clampi(suit, 0, 3)]]
+
+func pack() -> Array:
+	return [rank, suit, enhancement]
+
+static func unpack(row) -> CardData:
+	var a: Array = row if row is Array else []
+	var c: CardData = CardData.new(
+		int(a[0]) if a.size() > 0 else 1,
+		int(a[1]) if a.size() > 1 else 0,
+		true)
+	if a.size() > 2:
+		c.enhancement = str(a[2])
+	return c
+
+static func pack_hand(cards: Array) -> Array:
+	var out: Array = []
+	for c in cards:
+		if c is CardData:
+			out.append((c as CardData).pack())
+	return out
+
+static func unpack_hand(rows: Array) -> Array:
+	var out: Array = []
+	for row in rows:
+		out.append(unpack(row))
+	return out
+
+func matches_pack(row) -> bool:
+	var a: Array = row if row is Array else []
+	if a.size() < 2:
+		return false
+	if rank != int(a[0]) or suit != int(a[1]):
+		return false
+	if a.size() > 2 and str(a[2]) != enhancement:
+		return false
+	return true

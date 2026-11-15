@@ -1,6 +1,6 @@
 extends Control
 
-## President. Title → Solo vs AIs, or a local hotseat lobby.
+## President. Title → Solo vs AIs, hotseat lobby, or a joinable table (host = P1).
 
 signal trade_confirmed
 
@@ -46,10 +46,14 @@ var lobby: LobbyConfig
 var _view_seat: int = 0
 var _title_view: TitleView
 var _lobby_view: LobbyView
+var _join_view: JoinView
 var _handoff: HandoffView
 var _shop_queue: Array = []
 var _desk_phase: String = ""
 var _title_btn: Button
+var _net: NetSession
+var _lan_wait: Dictionary = {}
+var _client_shop_open: bool = false
 
 const AI_COLORS: Array = [
 	Color(0.55, 0.22, 0.22),
@@ -212,7 +216,7 @@ func _build_ui() -> void:
 	_trade_confirm = Button.new()
 	_trade_confirm.text = "Confirm tribute"
 	_trade_confirm.custom_minimum_size = Vector2(0, 48)
-	_trade_confirm.pressed.connect(func() -> void: trade_confirmed.emit())
+	_trade_confirm.pressed.connect(_on_trade_confirm_pressed)
 	tv.add_child(_trade_confirm)
 	var ovh: CenterContainer = CenterContainer.new()
 	ovh.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -249,15 +253,31 @@ func _build_ui() -> void:
 	add_child(_ai_timer)
 	_handoff = HandoffView.new()
 	add_child(_handoff)
+	_net = NetSession.new()
+	_net.name = "NetSession"
+	add_child(_net)
+	_net.lobby_changed.connect(_on_net_lobby_changed)
+	_net.match_started.connect(_on_net_match_started)
+	_net.snapshot_applied.connect(_apply_lan_snapshot)
+	_net.status_changed.connect(_on_net_status)
+	_net.server_lost.connect(_on_net_server_lost)
+	_net.intent.connect(_on_net_intent)
 	_lobby_view = LobbyView.new()
 	_lobby_view.visible = false
 	add_child(_lobby_view)
 	_lobby_view.started.connect(_on_lobby_started)
 	_lobby_view.cancelled.connect(_show_title)
+	_lobby_view.host_name_changed.connect(_on_host_renamed)
+	_join_view = JoinView.new()
+	_join_view.visible = false
+	add_child(_join_view)
+	_join_view.cancelled.connect(_show_title)
+	_join_view.connect_pressed.connect(_on_join_connect)
 	_title_view = TitleView.new()
 	add_child(_title_view)
 	_title_view.solo_pressed.connect(_on_solo)
 	_title_view.lobby_pressed.connect(_on_open_lobby)
+	_title_view.join_pressed.connect(_on_open_join)
 
 func _is_human(seat: int) -> bool:
 	return lobby != null and lobby.is_human(seat)
@@ -265,11 +285,29 @@ func _is_human(seat: int) -> bool:
 func _is_hotseat() -> bool:
 	return lobby != null and lobby.is_hotseat()
 
+func _is_lan() -> bool:
+	return _net != null and _net.active and lobby != null and lobby.lan
+
+func _is_authority() -> bool:
+	return _net == null or not _net.active or _net.is_host
+
+func _is_remote_human(seat: int) -> bool:
+	return _is_lan() and _net.is_host and _net.is_remote_seat(seat)
+
+func _local_seat() -> int:
+	if _is_lan():
+		return _net.local_seat if _net.local_seat >= 0 else 0
+	return _view_seat
+
 func _show_title() -> void:
 	_ai_timer.stop()
 	_busy = false
 	_trade_waiting = false
+	_lan_wait.clear()
+	_client_shop_open = false
 	_trade_panel.visible = false
+	if _net:
+		_net.close()
 	if _shop:
 		_shop.visible = false
 	if _results:
@@ -278,6 +316,8 @@ func _show_title() -> void:
 		_handoff.visible = false
 	if _lobby_view:
 		_lobby_view.visible = false
+	if _join_view:
+		_join_view.visible = false
 	if _overlay:
 		_overlay.visible = false
 	if _title_view:
@@ -290,21 +330,82 @@ func _on_solo() -> void:
 
 func _on_open_lobby() -> void:
 	_title_view.visible = false
-	_lobby_view.present(true)
+	_lobby_view.present(true, true)
+	lobby = _lobby_view.config
+	var err: Error = _net.host_listen(lobby, _lobby_view.host_player_name())
+	_lobby_view.set_lan_status(_net.status)
+	if err != OK:
+		lobby.lan = false
+		_lobby_view.lan_host = false
+		_lobby_view.set_lan_status(_net.status)
+
+func _on_open_join() -> void:
+	_title_view.visible = false
+	_join_view.present()
+
+func _on_join_connect(ip: String, player_name: String) -> void:
+	var err: Error = _net.join(ip, player_name)
+	_join_view.set_status(_net.status if err == OK else _net.status)
+
+func _on_host_renamed(player_name: String) -> void:
+	if lobby == null:
+		return
+	lobby.set_display_name(0, player_name)
+	if _net and _net.is_host:
+		_net.local_name = lobby.name_of(0)
+		_net.push_renames()
+
+func _on_net_lobby_changed() -> void:
+	if _net.lobby != null:
+		lobby = _net.lobby
+	if _lobby_view and _lobby_view.visible:
+		_lobby_view.config = lobby
+		_lobby_view.set_lan_status(_net.status)
+		_lobby_view._rebuild()
+	if _join_view and _join_view.visible and lobby != null:
+		_join_view.show_lobby(lobby, _net.local_seat)
+		_join_view.set_status(_net.status)
+
+func _on_net_status() -> void:
+	if _lobby_view and _lobby_view.visible:
+		_lobby_view.set_lan_status(_net.status)
+	if _join_view and _join_view.visible:
+		_join_view.set_status(_net.status)
+
+func _on_net_server_lost() -> void:
+	_message("Host left the table.")
+	_show_title()
+
+func _on_net_match_started() -> void:
+	if _join_view:
+		_join_view.visible = false
+	if _title_view:
+		_title_view.visible = false
+	_view_seat = _net.local_seat if _net.local_seat >= 0 else 0
 
 func _on_lobby_started(cfg: LobbyConfig) -> void:
 	lobby = cfg
+	if _net and _net.is_host:
+		lobby.lan = true
+		_net.announce_match()
 	_begin_play()
 
 func _begin_play() -> void:
 	_title_view.visible = false
 	_lobby_view.visible = false
-	_view_seat = int(lobby.human_seats()[0]) if not lobby.human_seats().is_empty() else 0
+	if _join_view:
+		_join_view.visible = false
+	if _is_lan() and _net.is_host:
+		_view_seat = 0
+	else:
+		_view_seat = int(lobby.human_seats()[0]) if not lobby.human_seats().is_empty() else 0
 	run.start_new_run(lobby)
 	_start_round()
 
 func _restart_run() -> void:
 	if _title_view.visible:
+		return
+	if not _is_authority():
 		return
 	if lobby == null:
 		lobby = LobbyConfig.solo()
@@ -326,6 +427,9 @@ func _plaque_for(seat: int) -> Control:
 	return _ai_plaques[i]
 
 func _await_handoff(to_seat: int) -> void:
+	if _is_lan():
+		_view_seat = _local_seat()
+		return
 	if not LobbyConfig.needs_handoff(lobby, _view_seat, to_seat):
 		_view_seat = to_seat
 		return
@@ -401,10 +505,14 @@ func _make_ai_plaque(seat: int) -> PanelContainer:
 	return wrap
 
 func _start_round() -> void:
+	if not _is_authority():
+		return
 	if _title_view:
 		_title_view.visible = false
 	if _lobby_view:
 		_lobby_view.visible = false
+	if _join_view:
+		_join_view.visible = false
 	if _handoff:
 		_handoff.visible = false
 	_overlay.visible = false
@@ -415,6 +523,7 @@ func _start_round() -> void:
 	_busy = false
 	if run.run_over:
 		_show_run_over()
+		_lan_push()
 		return
 	var live: Array = run.living_seats()
 	if live.size() < 2:
@@ -438,6 +547,7 @@ func _start_round() -> void:
 	await get_tree().create_timer(0.34).timeout
 	_deal_anim = false
 	await _resolve_tributes()
+	_lan_push()
 	_continue_turns()
 
 func _deal_pop() -> void:
@@ -456,6 +566,8 @@ func _deal_pop() -> void:
 		tw2.tween_property(fan, "modulate:a", 1.0, 0.28)
 
 func _continue_turns() -> void:
+	if not _is_authority():
+		return
 	if game.round_over:
 		_end_round()
 		return
@@ -468,11 +580,19 @@ func _continue_turns() -> void:
 			_pop_pass(who)
 			_message("%s is filibustered and passes." % run.name_of(who))
 			_refresh()
+			_lan_push()
 			_continue_turns()
 			return
 	_update_banner()
 	_pulse_turn(game.current_player)
 	if _is_human(game.current_player):
+		if _is_remote_human(game.current_player):
+			_busy = true
+			_lan_wait = {"kind": "turn", "seat": game.current_player}
+			_message("Waiting for %s…" % run.name_of(game.current_player))
+			_refresh()
+			_lan_push()
+			return
 		await _await_handoff(game.current_player)
 		_busy = false
 		_refresh()
@@ -480,9 +600,11 @@ func _continue_turns() -> void:
 			_message("%s's lead. Yellow cards are playable — tap one, then Play (or double-tap)." % run.name_of(_view_seat))
 		else:
 			_message("%s's turn. Yellow cards beat %d× %s. Double-tap to play, or Pass." % [run.name_of(_view_seat), game.trick_count, RankSystem.short_label(game.trick_rank)])
+		_lan_push()
 		return
 	_busy = true
 	_refresh()
+	_lan_push()
 	_ai_timer.start()
 
 func _pulse_turn(seat: int) -> void:
@@ -502,13 +624,19 @@ func _update_banner() -> void:
 		_banner.text = "Round over"
 		return
 	if _is_human(game.current_player):
-		_banner.text = "YOUR TURN  ·  %s" % run.name_of(game.current_player)
-		_banner.add_theme_color_override("font_color", Color(1.0, 0.88, 0.25))
+		if _is_remote_human(game.current_player) or (_is_lan() and game.current_player != _view_seat):
+			_banner.text = "Waiting for  %s" % run.name_of(game.current_player)
+			_banner.add_theme_color_override("font_color", Color(0.75, 0.85, 1.0))
+		else:
+			_banner.text = "YOUR TURN  ·  %s" % run.name_of(game.current_player)
+			_banner.add_theme_color_override("font_color", Color(1.0, 0.88, 0.25))
 	else:
 		_banner.text = "%s is playing…" % run.name_of(game.current_player)
 		_banner.add_theme_color_override("font_color", Color(0.75, 0.85, 1.0))
 
 func _ai_act() -> void:
+	if not _is_authority():
+		return
 	if game.round_over or _is_human(game.current_player):
 		_continue_turns()
 		return
@@ -525,6 +653,7 @@ func _ai_act() -> void:
 		_pop_pass(seat)
 		_message("%s passes." % run.name_of(seat))
 		_refresh()
+		_lan_push()
 		_continue_turns()
 		return
 	var combo: Dictionary = choice["combo"]
@@ -535,16 +664,20 @@ func _ai_act() -> void:
 		_pop_pass(seat)
 		_message("%s passes." % run.name_of(seat))
 		_refresh()
+		_lan_push()
 		_continue_turns()
 		return
 	_award_rank_gold(seat, int(combo.get("rank", 0)))
 	_message("%s plays %s." % [run.name_of(seat), str(r.get("label", ""))])
 	await _fly_from(origins, combo)
 	_refresh()
+	_lan_push()
 	_continue_turns()
 
 func _on_play() -> void:
-	if _busy or game.current_player != _view_seat or not _is_human(_view_seat) or game.round_over:
+	if game.current_player != _view_seat or not _is_human(_view_seat) or game.round_over:
+		return
+	if _is_authority() and _busy:
 		return
 	if _selected.is_empty():
 		_message("Tap a yellow card first.")
@@ -553,6 +686,12 @@ func _on_play() -> void:
 	var combo: Dictionary = {"rank": rank, "count": _selected.size()}
 	if not game.is_legal_combo(combo, _view_seat):
 		_message("Need %d of that rank to follow." % game.trick_count if not game.lead else "Illegal combo.")
+		return
+	if not _is_authority():
+		_net.send_intent({"kind": "play", "rank": rank, "count": int(combo["count"])})
+		_busy = true
+		_selected.clear()
+		_refresh()
 		return
 	var origins: Array = _selected_origins()
 	var r: Dictionary = game.play(_view_seat, combo)
@@ -565,19 +704,29 @@ func _on_play() -> void:
 	_busy = true
 	await _fly_from(origins, combo)
 	_refresh()
+	_lan_push()
 	_continue_turns()
 
 func _on_pass() -> void:
-	if _busy or game.current_player != _view_seat or not _is_human(_view_seat) or game.round_over:
+	if game.current_player != _view_seat or not _is_human(_view_seat) or game.round_over:
+		return
+	if _is_authority() and _busy:
 		return
 	if game.lead:
 		_message("You have the lead — play a yellow card.")
+		return
+	if not _is_authority():
+		_net.send_intent({"kind": "pass"})
+		_busy = true
+		_selected.clear()
+		_refresh()
 		return
 	game.pass_turn(_view_seat)
 	_selected.clear()
 	_pop_pass(_view_seat)
 	_message("%s passes." % run.name_of(_view_seat))
 	_refresh()
+	_lan_push()
 	_continue_turns()
 
 func _on_card_press(view: CardView, _pos: Vector2) -> void:
@@ -726,11 +875,18 @@ func _use_action(id: String) -> void:
 	if when == "results" or id == "just_say_no":
 		_message("%s is for the results desk, after the round." % str(info.get("name", id)))
 		return
-	if _busy or game.current_player != _view_seat or game.round_over:
+	if game.current_player != _view_seat or game.round_over:
 		_message("Actions are for your turn.")
+		return
+	if _is_authority() and _busy:
+		_message("Actions are for your turn.")
+		return
+	if not _is_authority():
+		_net.send_intent({"kind": "action", "id": id})
 		return
 	_fire_turn_action(_view_seat, id)
 	_refresh()
+	_lan_push()
 
 func _end_round() -> void:
 	_busy = true
@@ -739,6 +895,7 @@ func _end_round() -> void:
 	run.ai_shop_all()
 	_float_payouts()
 	_show_results()
+	_lan_push()
 
 func _float_payouts() -> void:
 	for p in run.last_payout:
@@ -751,8 +908,12 @@ func _float_payouts() -> void:
 		chip.add_theme_color_override("font_color", Color(0.4, 1.0, 0.5) if hp_d >= 0 else Color(1.0, 0.4, 0.35))
 		_fly_layer.add_child(chip)
 		var pos: Vector2 = _hand_row.global_position + Vector2(40, 0)
-		if seat > 0 and seat - 1 < _ai_plaques.size():
-			pos = (_ai_plaques[seat - 1] as Control).global_position
+		if seat == _view_seat:
+			pos = _hand_row.global_position + Vector2(40, 0)
+		else:
+			var pl: Control = _plaque_for(seat)
+			if pl != null:
+				pos = pl.global_position
 		chip.global_position = pos
 		var tw: Tween = create_tween()
 		tw.tween_property(chip, "global_position", pos + Vector2(0, -28), 0.8)
@@ -763,26 +924,38 @@ func _float_payouts() -> void:
 		)
 
 func _on_buy_upgrade(item: Dictionary) -> void:
+	if not _is_authority():
+		_net.send_intent({"kind": "shop_buy", "buy": "upgrade", "id": str(item["id"])})
+		return
 	if run.buy_upgrade(str(item["id"]), int(item["price"])):
 		run.take_shop_offer(str(item["id"]))
 		_message("Bought %s." % str(item["name"]))
 		_reopen_shop()
+		_lan_push()
 	else:
 		_message("Not enough gold.")
 
 func _on_buy_action(item: Dictionary) -> void:
+	if not _is_authority():
+		_net.send_intent({"kind": "shop_buy", "buy": "action", "id": str(item["id"])})
+		return
 	if run.buy_action(str(item["id"]), int(item["price"])):
 		run.take_shop_offer(str(item["id"]))
 		_message("Pocketed %s." % str(item["name"]))
 		_reopen_shop()
+		_lan_push()
 	else:
 		_message("Not enough gold.")
 
 func _on_buy_enhancement(item: Dictionary) -> void:
+	if not _is_authority():
+		_net.send_intent({"kind": "shop_buy", "buy": "enhancement", "id": str(item["id"])})
+		return
 	if run.buy_enhancement(str(item["id"]), int(item["price"])):
 		run.take_shop_offer(str(item["id"]))
 		_message("Stamped %s." % str(item["name"]))
 		_reopen_shop()
+		_lan_push()
 	else:
 		_message("Not enough gold.")
 
@@ -791,9 +964,19 @@ func _open_shop() -> void:
 	_advance_desk()
 
 func _open_shop_for(seat: int) -> void:
-	_view_seat = seat
+	if _is_remote_human(seat):
+		run.begin_shop_visit_for(seat)
+		_lan_wait = {"kind": "shop", "seat": seat}
+		_message("Waiting for %s at the desk…" % run.name_of(seat))
+		_lan_push()
+		return
+	if _is_lan() and _net.is_host:
+		_view_seat = 0
+	else:
+		_view_seat = seat
 	run.begin_shop_visit_for(seat)
 	_reopen_shop()
+	_lan_push()
 
 func _reopen_shop() -> void:
 	var s: int = run.shop_seat
@@ -811,6 +994,9 @@ func _advance_desk() -> void:
 		_start_round()
 		return
 	var seat: int = int(_shop_queue.pop_front())
+	if _is_remote_human(seat):
+		_open_shop_for(seat)
+		return
 	await _await_handoff(seat)
 	var acts: Array = run.result_action_ids_of(seat)
 	if not acts.is_empty() and _is_hotseat():
@@ -821,14 +1007,23 @@ func _advance_desk() -> void:
 	_open_shop_for(seat)
 
 func _on_shop_reroll() -> void:
+	if not _is_authority():
+		_net.send_intent({"kind": "shop_reroll"})
+		return
 	var cost: int = run.reroll_cost()
 	if run.reroll_shop():
 		_message("Rerolled the desk for $%d." % cost)
-		_reopen_shop()
+		if not _is_remote_human(run.shop_seat):
+			_reopen_shop()
+		_lan_push()
 	else:
 		_message("Need $%d to reroll." % cost)
 
 func _on_shop_closed() -> void:
+	if not _is_authority():
+		_client_shop_open = false
+		_net.send_intent({"kind": "shop_leave"})
+		return
 	_advance_desk()
 
 func _results_rows() -> Array:
@@ -843,11 +1038,15 @@ func _show_results() -> void:
 	var title: String = "Round %d  ·  stake %d" % [run.round_n, run.stake()]
 	var log_text: String = "\n".join(run.trade_log) if not run.trade_log.is_empty() else ""
 	var acts: Array = [] if _is_hotseat() else run.result_action_ids_of(_view_seat)
-	_results.present_round(title, _results_rows(), _tribute_preview(), log_text, acts)
+	_results.present_round(title, _results_rows(), _tribute_preview(), log_text, acts, true)
 
 func _on_results_continued() -> void:
+	if not _is_authority():
+		_net.send_intent({"kind": "results_continue"})
+		return
 	if run.run_over:
 		_show_run_over()
+		_lan_push()
 		return
 	if _desk_phase == "human_actions":
 		_desk_phase = ""
@@ -856,6 +1055,9 @@ func _on_results_continued() -> void:
 	_open_shop()
 
 func _on_results_action(id: String) -> void:
+	if not _is_authority():
+		_net.send_intent({"kind": "results_action", "id": id})
+		return
 	if not run.has_action_of(_view_seat, id):
 		return
 	if not run.spend_action_for(_view_seat, id):
@@ -867,6 +1069,7 @@ func _on_results_action(id: String) -> void:
 		_results.present_round("%s  ·  role cards" % run.name_of(_view_seat), _results_rows(), _tribute_preview(), "\n".join(run.trade_log), run.result_action_ids_of(_view_seat))
 	else:
 		_show_results()
+	_lan_push()
 
 func _adjust_pair(pair: Dictionary) -> void:
 	var g: int = int(pair["giver"])
@@ -924,7 +1127,9 @@ func _run_one_tribute(pair: Dictionary) -> void:
 	await get_tree().create_timer(0.35).timeout
 	var ret_n: int = int(pair.get("return_count", n))
 	var picks: Array = []
-	if _is_human(receiver):
+	if _is_remote_human(receiver):
+		picks = await _await_lan_tribute(receiver, ret_n, "Give %d card(s) back to %s (%s)" % [ret_n, run.name_of(giver), pair["giver_role"]])
+	elif _is_human(receiver):
 		await _await_handoff(receiver)
 		picks = await _await_player_picks(ret_n, "Give %d card(s) back to %s (%s)" % [ret_n, run.name_of(giver), pair["giver_role"]])
 	else:
@@ -1101,9 +1306,15 @@ func _sync_ais() -> void:
 func _sync_odds() -> void:
 	if _odds == null:
 		return
+	if not _is_authority() and _net.last_snapshot.has("odds"):
+		_odds.text = str(_net.last_snapshot.get("odds", ""))
+		return
 	_odds.text = OddsHelper.hud_text(game, run, _view_seat)
 
 func _whip(seat: int) -> void:
+	if not _is_authority():
+		_net.send_intent({"kind": "whip", "target": seat})
+		return
 	if run.whip_used and not run.has_upgrade_of(_view_seat, "majority"):
 		return
 	if not run.has_upgrade_of(_view_seat, "majority"):
@@ -1111,6 +1322,7 @@ func _whip(seat: int) -> void:
 	var legal: Array = game.legal_combos(seat)
 	_message("Whip Count: %s %s follow." % [run.name_of(seat), "CAN" if not legal.is_empty() else "cannot"])
 	_refresh()
+	_lan_push()
 
 func _sync_trick() -> void:
 	if game.lead or game.trick_count <= 0:
@@ -1199,6 +1411,250 @@ func _rebuild_actions() -> void:
 		var cap: String = str(id)
 		b.pressed.connect(func() -> void: _use_action(cap))
 		_action_row.add_child(b)
+
+func _on_trade_confirm_pressed() -> void:
+	if not _is_authority():
+		_net.send_intent({"kind": "tribute", "cards": CardData.pack_hand(_trade_picks)})
+		_trade_waiting = false
+		_trade_panel.visible = false
+		return
+	trade_confirmed.emit()
+
+func _await_lan_tribute(seat: int, count: int, prompt: String) -> Array:
+	_lan_wait = {"kind": "tribute", "seat": seat, "n": count, "prompt": prompt, "picks": []}
+	_message("Waiting for %s to return tribute." % run.name_of(seat))
+	_refresh()
+	_lan_push()
+	while str(_lan_wait.get("kind", "")) == "tribute":
+		await get_tree().process_frame
+	var packed: Array = _lan_wait.get("packed", [])
+	_lan_wait.clear()
+	return game.take_packed_from_hand(seat, packed)
+
+func _lan_phase() -> String:
+	if str(_lan_wait.get("kind", "")) == "tribute":
+		return "tribute"
+	if run != null and run.run_over:
+		return "run_over"
+	if str(_lan_wait.get("kind", "")) == "shop" or (_shop != null and _shop.visible):
+		return "shop"
+	if _results != null and _results.visible:
+		return "results"
+	return "play"
+
+func _lan_push() -> void:
+	if _net == null or not _net.is_host or not _net.active or not _net.in_match:
+		return
+	_net.broadcast_to_clients(Callable(self, "_snapshot_for"))
+
+func _snapshot_for(seat: int) -> Dictionary:
+	var phase: String = _lan_phase()
+	var tribute: Dictionary = {}
+	if phase == "tribute" and int(_lan_wait.get("seat", -1)) == seat:
+		tribute = {
+			"need": int(_lan_wait.get("n", 1)),
+			"prompt": str(_lan_wait.get("prompt", "Return tribute cards.")),
+		}
+	var shop: Dictionary = {}
+	if phase == "shop" and run.shop_seat == seat:
+		shop = {
+			"gold": run.gold_of(seat),
+			"offers": _priced_offers_for(seat),
+			"owned": run.owned_counts_of(seat),
+			"reroll": run.reroll_cost(),
+			"context": "%s  ·  Gold $%d  ·  HP %d/%d  ·  %d offers" % [
+				run.name_of(seat), run.gold_of(seat), int(run.hp[seat]), int(run.seat_max_hp[seat]), run.shop_offers.size()],
+		}
+	var acts: Array = []
+	if phase == "results":
+		acts = run.result_action_ids_of(seat)
+	return {
+		"phase": phase,
+		"msg": _msg.text if _msg else "",
+		"banner": _banner.text if _banner else "",
+		"odds": OddsHelper.hud_text(game, run, seat),
+		"lobby": lobby.to_dict() if lobby != null else {},
+		"run": run.pack_public(),
+		"game": game.pack_public(),
+		"hand": game.pack_hand(seat),
+		"shop": shop,
+		"tribute": tribute,
+		"results_title": ("Round %d  ·  stake %d" % [run.round_n, run.stake()]) if phase == "results" or phase == "run_over" else "",
+		"results_preview": _tribute_preview() if phase == "results" else "",
+		"results_log": "\n".join(run.trade_log),
+		"results_actions": acts,
+		"run_over_title": "",
+		"run_over_body": "",
+		"can_continue": false,
+	}
+
+func _apply_lan_snapshot(data: Dictionary) -> void:
+	if _is_authority():
+		return
+	_net.last_snapshot = data
+	_view_seat = int(data.get("local_seat", _net.local_seat))
+	if data.has("lobby") and data["lobby"] is Dictionary:
+		lobby = LobbyConfig.from_dict(data["lobby"])
+	if data.has("run") and data["run"] is Dictionary:
+		run.apply_public(data["run"])
+	if data.has("game") and data["game"] is Dictionary:
+		game.apply_replica(data["game"], _view_seat, data.get("hand", []))
+		game.mods = run
+	_title_view.visible = false
+	_lobby_view.visible = false
+	_join_view.visible = false
+	var phase: String = str(data.get("phase", "play"))
+	_message(str(data.get("msg", "")))
+	if _banner:
+		_banner.text = str(data.get("banner", ""))
+	_selected.clear()
+	_busy = false
+	_client_shop_open = false
+	var tribute: Dictionary = data.get("tribute", {})
+	if tribute is Dictionary and not tribute.is_empty() and int(tribute.get("need", 0)) > 0:
+		_trade_need = int(tribute.get("need", 1))
+		_trade_picks.clear()
+		_trade_waiting = true
+		_trade_prompt.text = str(tribute.get("prompt", "Return tribute."))
+		_trade_confirm.disabled = true
+		_trade_panel.visible = true
+	else:
+		_trade_waiting = false
+		_trade_panel.visible = false
+	var shop: Dictionary = data.get("shop", {})
+	if shop is Dictionary and not shop.is_empty() and shop.has("offers"):
+		_shop.present(int(shop.get("gold", 0)), shop.get("offers", []), shop.get("owned", {}), int(shop.get("reroll", 2)), str(shop.get("context", "")))
+		_client_shop_open = true
+	else:
+		_shop.visible = false
+	if phase == "results":
+		_results.present_round(
+			str(data.get("results_title", "Round")),
+			run.last_payout,
+			str(data.get("results_preview", "")),
+			str(data.get("results_log", "")),
+			data.get("results_actions", []),
+			false)
+	elif phase == "run_over":
+		_show_run_over()
+	else:
+		_results.visible = false
+	_refresh()
+
+func _on_net_intent(data: Dictionary) -> void:
+	if not _is_authority():
+		return
+	var kind: String = str(data.get("kind", ""))
+	var seat: int = int(data.get("seat", -1))
+	match kind:
+		"play":
+			_host_remote_play(seat, int(data.get("rank", 0)), int(data.get("count", 1)))
+		"pass":
+			_host_remote_pass(seat)
+		"action":
+			if game.current_player == seat:
+				_fire_turn_action(seat, str(data.get("id", "")))
+				_refresh()
+				_lan_push()
+		"shop_buy":
+			_host_shop_buy(seat, str(data.get("buy", "")), str(data.get("id", "")))
+		"shop_reroll":
+			if run.shop_seat == seat:
+				_on_shop_reroll()
+		"shop_leave":
+			if str(_lan_wait.get("kind", "")) == "shop" and int(_lan_wait.get("seat", -1)) == seat:
+				_lan_wait.clear()
+				_advance_desk()
+				_lan_push()
+		"results_continue":
+			pass
+		"results_action":
+			if run.has_action_of(seat, str(data.get("id", ""))) and run.spend_action_for(seat, str(data.get("id", ""))):
+				var line: String = run.apply_results_action(seat, str(data.get("id", "")))
+				if line != "":
+					run.log_event(line)
+				_lan_push()
+		"tribute":
+			if str(_lan_wait.get("kind", "")) == "tribute" and int(_lan_wait.get("seat", -1)) == seat:
+				_lan_wait["packed"] = data.get("cards", [])
+				_lan_wait["kind"] = "done"
+		"whip":
+			var saved: int = _view_seat
+			_view_seat = seat
+			_whip(int(data.get("target", 1)))
+			_view_seat = saved
+		"peer_left":
+			_sync_run_from_lobby()
+			if str(_lan_wait.get("kind", "")) != "" and int(_lan_wait.get("seat", -1)) == seat:
+				_lan_wait.clear()
+				if game.round_over:
+					_advance_desk()
+				else:
+					_continue_turns()
+			_lan_push()
+
+func _sync_run_from_lobby() -> void:
+	if lobby == null or run == null:
+		return
+	run.lobby = lobby
+	run.human_seats = lobby.human_seats().duplicate()
+	run.seat_names = lobby.display_names.duplicate()
+
+func _host_remote_play(seat: int, rank: int, count: int) -> void:
+	if game.current_player != seat or not _is_human(seat) or game.round_over:
+		return
+	var combo: Dictionary = {"rank": rank, "count": count}
+	if not game.is_legal_combo(combo, seat):
+		return
+	var origins: Array = _seat_origins(seat, count)
+	var r: Dictionary = game.play(seat, combo)
+	if not bool(r.get("ok", false)):
+		return
+	_award_rank_gold(seat, rank)
+	_message("%s plays %s." % [run.name_of(seat), str(r.get("label", ""))])
+	_lan_wait.clear()
+	_busy = true
+	await _fly_from(origins, combo)
+	_refresh()
+	_lan_push()
+	_continue_turns()
+
+func _host_remote_pass(seat: int) -> void:
+	if game.current_player != seat or not _is_human(seat) or game.round_over:
+		return
+	if game.lead:
+		return
+	game.pass_turn(seat)
+	_pop_pass(seat)
+	_message("%s passes." % run.name_of(seat))
+	_lan_wait.clear()
+	_refresh()
+	_lan_push()
+	_continue_turns()
+
+func _host_shop_buy(seat: int, buy: String, id: String) -> void:
+	if run.shop_seat != seat:
+		return
+	var item: Dictionary = {}
+	for it in run.shop_offers:
+		if str(it.get("id", "")) == id:
+			item = it
+			break
+	if item.is_empty():
+		return
+	item = run.priced_copy_of(seat, item)
+	var ok: bool = false
+	match buy:
+		"upgrade":
+			ok = run.buy_upgrade(id, int(item.get("price", 0)))
+		"action":
+			ok = run.buy_action(id, int(item.get("price", 0)))
+		"enhancement":
+			ok = run.buy_enhancement(id, int(item.get("price", 0)))
+	if ok:
+		run.take_shop_offer(id)
+		_message("%s bought %s." % [run.name_of(seat), str(item.get("name", id))])
+		_lan_push()
 
 class TableFelt extends Control:
 	func _draw() -> void:

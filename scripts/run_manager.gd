@@ -710,3 +710,115 @@ func apply_deal_effects(game: PresidentGame) -> Array:
 			Deck._sort_hand(game.hands[s])
 	game.mods = self
 	return logs
+
+func pack_public() -> Dictionary:
+	_ensure_seat_arrays()
+	return {
+		"round_n": round_n,
+		"seat_count": seat_count,
+		"hp": hp.duplicate(),
+		"seat_gold": seat_gold.duplicate(),
+		"seat_max_hp": seat_max_hp.duplicate(),
+		"seat_names": seat_names.duplicate(),
+		"human_seats": human_seats.duplicate(),
+		"seat_upgrades": _dup_arrays(seat_upgrades),
+		"seat_actions": _dup_arrays(seat_actions),
+		"seat_enhancements": _dup_arrays(seat_enhancements),
+		"seat_favorite": seat_favorite.duplicate(),
+		"seat_rank_mods": _dup_mods(seat_rank_mods),
+		"whip_used": whip_used,
+		"last_payout": last_payout.duplicate(true),
+		"last_first": last_first,
+		"last_finish": last_finish.duplicate(),
+		"cancelled_tribute_seats": cancelled_tribute_seats.duplicate(),
+		"skip_tributes": skip_tributes,
+		"trade_log": trade_log.duplicate(),
+		"last_roles": last_roles.duplicate(),
+		"last_role": last_role,
+		"role_streak_role": role_streak_role.duplicate(),
+		"role_streak_len": role_streak_len.duplicate(),
+		"shop_offers": shop_offers.duplicate(true),
+		"shop_rerolls": shop_rerolls,
+		"shop_seat": shop_seat,
+		"run_over": run_over,
+		"run_won": run_won,
+	}
+
+func apply_public(d: Dictionary) -> void:
+	_ensure_seat_arrays()
+	round_n = int(d.get("round_n", 1))
+	seat_count = int(d.get("seat_count", 6))
+	hp = _ints_of(d.get("hp", hp))
+	seat_gold = _ints_of(d.get("seat_gold", seat_gold))
+	seat_max_hp = _ints_of(d.get("seat_max_hp", seat_max_hp))
+	seat_names = _strs_of(d.get("seat_names", seat_names))
+	human_seats = _ints_of(d.get("human_seats", human_seats))
+	seat_upgrades = _dup_arrays(d.get("seat_upgrades", seat_upgrades))
+	seat_actions = _dup_arrays(d.get("seat_actions", seat_actions))
+	seat_enhancements = _dup_arrays(d.get("seat_enhancements", seat_enhancements))
+	seat_favorite = _ints_of(d.get("seat_favorite", seat_favorite))
+	seat_rank_mods = _dup_mods(d.get("seat_rank_mods", seat_rank_mods))
+	whip_used = bool(d.get("whip_used", false))
+	last_payout = []
+	for p in d.get("last_payout", []):
+		if p is Dictionary:
+			last_payout.append((p as Dictionary).duplicate())
+	last_first = int(d.get("last_first", 0))
+	last_finish = _ints_of(d.get("last_finish", []))
+	cancelled_tribute_seats = _ints_of(d.get("cancelled_tribute_seats", []))
+	skip_tributes = bool(d.get("skip_tributes", false))
+	trade_log = _strs_of(d.get("trade_log", []))
+	last_roles = _strs_of(d.get("last_roles", last_roles))
+	last_role = str(d.get("last_role", ""))
+	role_streak_role = _strs_of(d.get("role_streak_role", role_streak_role))
+	role_streak_len = _ints_of(d.get("role_streak_len", role_streak_len))
+	shop_offers = []
+	for o in d.get("shop_offers", []):
+		if o is Dictionary:
+			shop_offers.append((o as Dictionary).duplicate())
+	shop_rerolls = int(d.get("shop_rerolls", 0))
+	shop_seat = int(d.get("shop_seat", 0))
+	run_over = bool(d.get("run_over", false))
+	run_won = bool(d.get("run_won", false))
+	if lobby == null:
+		lobby = LobbyConfig.new()
+	lobby.seat_count = seat_count
+	lobby.display_names = seat_names.duplicate()
+	lobby.kinds.clear()
+	for i in range(LobbyConfig.MAX_SEATS):
+		lobby.kinds.append(LobbyConfig.KIND_HUMAN if human_seats.has(i) else LobbyConfig.KIND_AI)
+	lobby.lan = true
+	changed.emit()
+
+func _dup_arrays(src) -> Array:
+	var out: Array = []
+	for row in src:
+		var inner: Array = []
+		if row is Array:
+			for v in row:
+				inner.append(v)
+		out.append(inner)
+	return out
+
+func _dup_mods(src) -> Array:
+	var out: Array = []
+	for row in src:
+		var inner: Array = []
+		if row is Array:
+			for v in row:
+				if v is Dictionary:
+					inner.append((v as Dictionary).duplicate())
+		out.append(inner)
+	return out
+
+func _ints_of(src) -> Array:
+	var out: Array = []
+	for v in src:
+		out.append(int(v))
+	return out
+
+func _strs_of(src) -> Array:
+	var out: Array = []
+	for v in src:
+		out.append(str(v))
+	return out

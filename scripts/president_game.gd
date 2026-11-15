@@ -250,3 +250,88 @@ func _ord(n: int) -> String:
 func place_of(seat: int) -> int:
 	var i: int = finished.find(seat)
 	return i + 1 if i >= 0 else 0
+
+func pack_hand(seat: int) -> Array:
+	return CardData.pack_hand(hand_of(seat))
+
+func pack_public() -> Dictionary:
+	var counts: Array = []
+	var labels: Array = []
+	for s in range(SEATS):
+		counts.append(hand_of(s).size())
+		labels.append(str(last_play_label.get(s, "")))
+	return {
+		"living": living.duplicate(),
+		"finished": finished.duplicate(),
+		"current_player": current_player,
+		"lead": lead,
+		"trick_rank": trick_rank,
+		"trick_count": trick_count,
+		"trick_player": trick_player,
+		"passes": passes,
+		"skip_seat": skip_seat,
+		"must_pass_seat": must_pass_seat,
+		"exec_order": exec_order,
+		"peek_seat": peek_seat,
+		"round_over": round_over,
+		"history": history.duplicate(true),
+		"hand_counts": counts,
+		"last_play": labels,
+		"kitty_n": kitty.size(),
+		"peek_hand": pack_hand(peek_seat) if peek_seat >= 0 else [],
+	}
+
+## Client replica: your real hand, dummy backs for everyone else (plus Leak).
+func apply_replica(d: Dictionary, my_seat: int, my_hand: Array) -> void:
+	living = []
+	for s in d.get("living", []):
+		living.append(int(s))
+	finished = []
+	for s2 in d.get("finished", []):
+		finished.append(int(s2))
+	current_player = int(d.get("current_player", 0))
+	lead = bool(d.get("lead", true))
+	trick_rank = int(d.get("trick_rank", 0))
+	trick_count = int(d.get("trick_count", 0))
+	trick_player = int(d.get("trick_player", -1))
+	passes = int(d.get("passes", 0))
+	skip_seat = int(d.get("skip_seat", -1))
+	must_pass_seat = int(d.get("must_pass_seat", -1))
+	exec_order = bool(d.get("exec_order", false))
+	peek_seat = int(d.get("peek_seat", -1))
+	round_over = bool(d.get("round_over", false))
+	history = []
+	for h in d.get("history", []):
+		if h is Dictionary:
+			history.append((h as Dictionary).duplicate())
+	kitty.clear()
+	var counts: Array = d.get("hand_counts", [])
+	hands.clear()
+	last_play_label.clear()
+	var labels: Array = d.get("last_play", [])
+	var peek_rows: Array = d.get("peek_hand", [])
+	for s3 in range(SEATS):
+		var n: int = int(counts[s3]) if s3 < counts.size() else 0
+		if s3 < labels.size() and str(labels[s3]) != "":
+			last_play_label[s3] = str(labels[s3])
+		if s3 == my_seat:
+			hands[s3] = CardData.unpack_hand(my_hand)
+		elif s3 == peek_seat and not peek_rows.is_empty():
+			hands[s3] = CardData.unpack_hand(peek_rows)
+		else:
+			var dummy: Array = []
+			for i in range(n):
+				dummy.append(CardData.new(3, i % 4, false))
+			hands[s3] = dummy
+
+func take_packed_from_hand(seat: int, packed: Array) -> Array:
+	var out: Array = []
+	var hand: Array = hand_of(seat)
+	for row in packed:
+		for c in hand:
+			if c in out:
+				continue
+			if (c as CardData).matches_pack(row):
+				out.append(c)
+				break
+	return out
