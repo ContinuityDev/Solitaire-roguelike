@@ -88,19 +88,21 @@ godot --headless --script tests/logic_test.gd   # logic smoke test: prints ALL T
 
 | Action | Input |
 |---|---|
-| Draw from stock / recycle waste | Click the stock (top-left) |
-| Select a card or stack | Click it |
-| Move selected card(s) | Click the destination pile (tableau column or foundation) |
-| Send top card to foundation | **Double-click** the card |
-| Deselect | Click the selected card again |
-| Finish a trick | Click **Take a Bow** once your applause meets the target |
+| Draw from stock / recycle waste | Tap/click the stock (top-left) |
+| Select a card or stack | Tap it |
+| Move selected card(s) | Tap the destination pile, **or drag** the stack onto it |
+| Best available spot | **Double-tap** a card (finale pile if legal, else reveal / free a column / extend a Pattern / any legal park) |
+| Deselect | Tap the selected card again |
+| Finish a trick | Tap **Take a Bow** once your applause meets the target |
 | Hint / Restart Run | Buttons in the top bar |
 
-Click-to-move is used instead of drag-and-drop: on a tableau column, clicking any face-up card selects that card *and every card on top of it* as a stack.
+Tap-to-select still works; drag is the faster path. On a tableau column, pressing any face-up card lifts that card *and every card on top of it* as a stack. Legal drop piles light up while you drag.
 
 ## How a run works
 
-- **Acts & tricks:** A run is 8 acts. Each act is one trick with an applause target (shown top-left; it grows roughly as `240 × act^1.45`).
+- **Acts & tricks:** A run is 8 acts. Each act is one trick with an applause target (shown top-left; it grows roughly as `240 × act^1.45`). From Act 3 the *board* also changes — Walls appear, face-down depth grows, and free redeals tighten — so later Acts play differently, not just bigger.
+- **Patterns (Tricks):** named formations you hunt for, like Balatro hands. Tableau: Natural Run, Silk Rope, Royal Descent, Rainbow Run. Finale: Book of Four, Grand Staircase, Suit Surge, Mirror Pair. Reveal/space: Excavation, Breakout, Full House-keeping. Each pays Applause (scaled by Flair) and is listed under "Tricks performed" for the Act. Pattern Props in the shop bend these (Encore Bunting, Silk Rope, Bookbinder's Mallet).
+- **Walls:** sealed tableau columns you must crack — Brick / Curtain (any Pattern), Iron (Jack+ to a finale pile), Cracked (3 finale plays). Column 0 always starts open so you are never soft-locked. Grand Illusion bosses still hit every 3rd Act alongside Walls.
 - **Winning a round:** Clear the whole board onto the finale piles (big clear bonus), *or* reach the applause target and press **Take a Bow**. You can keep playing after hitting the target to farm applause — but if you run out of moves, you lose.
 - **Losing:** If no legal moves remain (stock empty, no redeals, nothing placeable) and the round isn't won, the run ends. **Restart Run** starts over at A–5.
 - **Shop:** After each trick, visit **The Prop Table** and pick **1 of 3** props (or skip). One slot is (almost) always **Raise the Curtain Cast**, which grows your deck.
@@ -147,7 +149,7 @@ Ranks are **plain integers** — there is no enum to exhaust (`scripts/rank.gd`)
 
 ## Props (upgrades / relics)
 
-Defined data-driven in `scripts/upgrade_db.gd` (`UpgradeDB.UPGRADES`). Included: **White Gloves** (+1 Flair), **House Tithe** (Flair per finale card), **Second Wind (Vanish & Return)** (+1 redeal), **Sprouting Wand** (Aces/2s wild on tableau), **Metronome** (+10 applause per move), **Wider Stage** (+1 tableau column), **Sleight Specs** (peek top 3 of stock), **Grand Showman** (J-or-higher finale plays score double), **Quick-Change Coat** (bigger reveal bonus), **Stardust Oil** (faster streak Flair) — plus the repeatable **Raise the Curtain Cast** rank reward.
+Defined data-driven in `scripts/upgrade_db.gd` (`UpgradeDB.UPGRADES`). Included: **White Gloves**, **House Tithe**, **Second Wind**, **Sprouting Wand**, **Metronome**, **Wider Stage**, **Sleight Specs**, **Grand Showman**, **Quick-Change Coat**, **Stardust Oil**, plus Pattern Props **Encore Bunting** / **Silk Rope** / **Bookbinder's Mallet**, and the repeatable **Raise the Curtain Cast** rank reward.
 
 **Adding a prop:** append one dictionary to `UPGRADES` (`id`, `name`, `icon`, `desc`, `unique`, `kind`), then read the id where its effect belongs: scoring in `RunManager.score_for_event()`, placement rules in `SolitaireBoard`, round setup in `Main._start_round()`. No shop code changes needed — it will start appearing as an offer automatically.
 
@@ -159,28 +161,31 @@ Defined data-driven in `scripts/upgrade_db.gd` (`UpgradeDB.UPGRADES`). Included:
 project.godot
 scenes/main.tscn        # single main scene (UI is built in code)
 scripts/
-  main.gd               # UI, input (click-to-move), round/shop flow
+  main.gd               # UI, tap/drag/double-tap, Patterns/Walls flow
   card_view.gd          # one card, drawn with code — no textures
-  solitaire_board.gd    # pure Klondike logic: piles, legal moves, win check
+  solitaire_board.gd    # Klondike logic, walls, find_best_move, column_at_x
+  pattern_db.gd         # Pattern table + tableau detectors
   card_data.gd          # one card: integer rank + suit
   deck.gd               # deck generation for any max rank
   rank.gd               # the extensible rank system (names, chips, tiers)
-  run_manager.gd        # ante/target/score/Mult/streak, run state
+  run_manager.gd        # ante/target/score, patterns, Act bands
   upgrade_db.gd         # data-driven upgrade definitions + shop generation
   shop.gd               # pick-1-of-3 reward screen
 tests/logic_test.gd     # headless logic smoke test
+tests/hit_probe.gd      # leftmost-column geometry regression
 ```
 
 ## Known limitations / ideas for next steps
 
-- Click-to-move only (no drag), waste shows only its top card, stock draws 1 (no draw-3 mode yet).
+- Waste shows only its top card; stock draws 1 (no draw-3 mode yet).
+- Pattern/Wall prototype needs a phone playtest before locking the core (see decision gate).
 - One blind per ante (no Small/Big/Boss choice, no gold or priced shop — rewards are free picks).
 - Seeded shuffling exists in the logic layer, but there's no run-seed UI or save/persistence yet.
 - Card faces for ascended ranks are named labels rather than unique art — a natural place for generated card art later.
 
 ## Mobile & web (added in the phone/web pass)
 
-- **Touch:** every interaction is tap-based (tap card → tap destination, tap stock to draw, double-tap a card to send it to its foundation). No hover, drag, or right-click is used anywhere. `project.godot` enables emulate-mouse-from-touch, and `CardView` also handles raw `InputEventScreenTouch` with de-duplication and manual double-tap detection (touch double-click reporting varies by browser).
+- **Touch:** tap, drag, and double-tap. `project.godot` enables emulate-mouse-from-touch; `CardView` emits press events with de-duplication, and `Main` decides tap vs drag vs double-tap. Tableau columns use explicit x positions (`SolitaireBoard.column_at_x`) so a left-edge press cannot be delivered to the rightmost column.
 - **Responsive layout:** the project base size is a portrait phone (390×844) with `canvas_items` stretch + `expand` aspect (desktop launches at 1280×800 via the window-size override). `Main._apply_responsive_layout()` sizes cards from the live viewport: card width is driven by the widest row, clamped to ≈38–92 px (≈52 px wide at 390 px, a comfortable tap target), the HUD switches to compact 2-column text and the buttons wrap on narrow screens, and shop buttons shrink to phone width. Suits are drawn from circles/polygons rather than font glyphs, which are missing in web exports.
 - **Exports:** `export_presets.cfg` contains **Web** and **Android** presets. The Web preset uses the no-threads template variant, so a plain static server works (below). The Android preset (package placeholder `com.hayden.solitaire.roguelike`, arm64, sensor orientation, immersive) is configured but **no APK was built in this environment — there is no Android SDK/keystore here**; build it from a machine with the Android SDK installed via Godot's Android export.
 
@@ -195,7 +200,7 @@ python3 -m http.server 8000
 # or http://<this-machine-ip>:8000 on a phone on the same network
 ```
 
-On a phone, tap cards to select/move and double-tap to send a card to its foundation.
+On a phone, tap or drag cards to move them, and double-tap to send a card to its best available spot.
 
 ## Rank polish, encores & enchantments (feature pass 2)
 

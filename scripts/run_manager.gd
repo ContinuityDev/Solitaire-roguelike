@@ -72,11 +72,28 @@ func start_new_run() -> void:
 	endless = false
 	start_round()
 
+# Pattern state (reset each round): foundation play sequence, reveal
+# streak, per-Act pattern counts, and anti-farming tableau signatures.
+var foundation_history: Array = [] # [{rank, suit, red}]
+var flips_since_draw: int = 0
+var patterns_this_round: Dictionary = {} # pattern id -> count
+var awarded_tableau_patterns: Dictionary = {} # "id|column|signature" -> true
+var book_done_this_round: bool = false
+var books_completed: Dictionary = {} # rank:int -> true, so Book fires once per rank
+var metrics: Dictionary = {"patterns": 0, "walls_opened": 0, "dead_boards": 0, "acts_played": 0}
+
 func start_round() -> void:
 	score = 0
 	streak = 0
 	moves = 0
 	foundation_this_round = 0
+	foundation_history.clear()
+	flips_since_draw = 0
+	patterns_this_round.clear()
+	awarded_tableau_patterns.clear()
+	book_done_this_round = false
+	books_completed.clear()
+	metrics["acts_played"] = int(metrics["acts_played"]) + 1
 	combo_rank = 0
 	combo_chain = 0
 	combo_grace_available = true
@@ -196,7 +213,132 @@ func extra_columns() -> int:
 func redeals_for_round() -> int:
 	if boss_id() == "no_redeals":
 		return 0
-	return 1 + count_upgrade("extra_redeal")
+	# Act band: from Act 7 the stock no longer recycles for free;
+	# Second Wind props still restore redeals on top of the band.
+	var base: int = 1 if ante < 7 else 0
+	return base + count_upgrade("extra_redeal")
+
+## Board-changing Act bands (the scaling curve beyond target numbers):
+## Acts 1-2 teach on clean boards, Act 3 raises the first Wall with its
+## Grand Illusion, mid Acts rotate wall kinds, late Acts raise two walls.
+func act_board_config(a: int = -1) -> Dictionary:
+	var x: int = ante if a < 0 else a
+	var kinds: Array = []
+	match x:
+		1, 2:
+			kinds = []
+		3:
+			kinds = ["brick"]
+		4:
+			kinds = ["cracked"]
+		5:
+			kinds = ["iron"]
+		6:
+			kinds = ["brick", "cracked"]
+		7:
+			kinds = ["iron", "cracked"]
+		_:
+			var cycle: Array = [["iron", "brick"], ["cracked", "curtain"], ["brick", "iron"]]
+			kinds = cycle[(x - 8) % cycle.size()]
+	var specs: Array = []
+	var names: Dictionary = {"brick": "Brick Wall", "cracked": "Cracked Wall", "iron": "Iron Wall", "curtain": "Curtain Wall"}
+	for k in kinds:
+		specs.append({"kind": str(k), "name": str(names.get(str(k), "Wall"))})
+	var bury: int = 0
+	if x >= 7:
+		bury = 2
+	elif x >= 4:
+		bury = 1
+	var band: String = "clean"
+	if x == 3:
+		band = "first_wall"
+	elif x >= 4 and x <= 5:
+		band = "walls"
+	elif x >= 6:
+		band = "double_walls"
+	return {"wall_specs": specs, "band": band, "bury": bury}
+
+# ------------------------------------------------------------ patterns
+
+## Award a pattern once detected. Returns Applause points granted.
+func register_pattern(id: String) -> int:
+	if PatternDB.get_by_id(id).is_empty():
+		return 0
+	var pts: float = float(PatternDB.base_reward(id))
+	if has_upgrade("pattern_fan"):
+		pts *= 1.5
+	if has_upgrade("silk_rope") and (id == "rope" or id == "natural_run"):
+		pts *= 2.0
+	if has_upgrade("bookbinder") and id == "book":
+		pts *= 1.5
+	var points: int = int(round(pts * effective_mult()))
+	score += points
+	patterns_this_round[id] = int(patterns_this_round.get(id, 0)) + 1
+	metrics["patterns"] = int(metrics["patterns"]) + 1
+	if id == "book":
+		book_done_this_round = true
+	score_changed.emit()
+	return points
+
+## Record a foundation (finale) play AFTER it lands; returns pattern ids
+## it completed (Book / Staircase / Suit Surge / Mirror Pair).
+func register_foundation_play(card: CardData, board: SolitaireBoard) -> Array:
+	var found: Array = []
+	foundation_history.append({"rank": card.rank, "suit": card.suit, "red": card.is_red()})
+	var n: int = foundation_history.size()
+	if n >= 2:
+		var prev: Dictionary = foundation_history[n - 2]
+		if int(prev["rank"]) == card.rank and bool(prev["red"]) != card.is_red():
+			found.append("mirror_pair")
+	if n >= 3:
+		var a: Dictionary = foundation_history[n - 3]
+		var b: Dictionary = foundation_history[n - 2]
+		if int(a["suit"]) == card.suit and int(b["suit"]) == card.suit:
+			found.append("suit_surge")
+	if n >= 4:
+		var asc: bool = true
+		for i in range(n - 3, n):
+			if int(foundation_history[i]["rank"]) != int(foundation_history[i - 1]["rank"]) + 1:
+				asc = false
+				break
+		if asc:
+			found.append("staircase")
+	# Book: all four suits now reach this rank, and this play was the card
+	# that completed it (this suit's pile top is exactly this rank).
+	if board != null and not books_completed.has(card.rank):
+		var complete: bool = true
+		for s in range(4):
+			if board.foundation_pile(s).size() < card.rank:
+				complete = false
+				break
+		if complete and board.foundation_pile(card.suit).size() == card.rank:
+			found.append("book")
+			books_completed[card.rank] = true
+	return found
+
+## A face-down card flipped. Returns true when Excavation (3 in a row
+## without a stock draw) completes.
+func register_flip() -> bool:
+	flips_since_draw += 1
+	if flips_since_draw >= 3:
+		flips_since_draw = 0
+		return true
+	return false
+
+func note_draw() -> void:
+	flips_since_draw = 0
+
+func note_dead_board() -> void:
+	metrics["dead_boards"] = int(metrics["dead_boards"]) + 1
+	print("[metrics] dead board at Act ", ante, " metrics=", metrics)
+
+func patterns_text() -> String:
+	if patterns_this_round.is_empty():
+		return "Tricks performed: none yet — build a run, book a rank, crack a wall."
+	var parts: Array[String] = []
+	for id in patterns_this_round.keys():
+		parts.append("%s x%d" % [PatternDB.display_name(str(id)), int(patterns_this_round[id])])
+	return "Tricks performed: " + ", ".join(parts)
 
 func effective_mult() -> float:
 	var m: float = base_mult

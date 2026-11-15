@@ -30,7 +30,18 @@ var _ranks_label: Label
 var _score_msg: String = ""
 var _cash_out_btn: Button
 var _top_row: HBoxContainer
-var _tableau_row: HBoxContainer
+var _tableau_row: Control
+var _patterns_label: Label
+var _dest_views: Array = [] # [{view, dest}] rebuilt every _refresh, for drag drop targets
+var _drag_candidate: Dictionary = {}
+var _drag_press_pos: Vector2 = Vector2.ZERO
+var _drag_offset: Vector2 = Vector2.ZERO
+var _dragging: bool = false
+var _drag_layer: Control
+var _drag_source_view: CardView
+var _last_tap_msec: int = 0
+var _last_tap_key: String = ""
+var _pending_dest: Dictionary = {}
 var _board_area: VBoxContainer
 var _shop: Shop
 var _overlay: PanelContainer
@@ -93,6 +104,11 @@ func _build_ui() -> void:
 	_ranks_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_ranks_label.add_theme_font_size_override("font_size", 12)
 	root.add_child(_ranks_label)
+	_patterns_label = Label.new()
+	_patterns_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_patterns_label.add_theme_font_size_override("font_size", 12)
+	_patterns_label.add_theme_color_override("font_color", Color(0.65, 0.95, 0.75))
+	root.add_child(_patterns_label)
 
 	# HFlowContainer wraps buttons onto a second row on narrow phone screens.
 	var buttons: HFlowContainer = HFlowContainer.new()
@@ -126,10 +142,19 @@ func _build_ui() -> void:
 	_top_row.add_theme_constant_override("separation", 14)
 	root.add_child(_top_row)
 
-	_tableau_row = HBoxContainer.new()
-	_tableau_row.add_theme_constant_override("separation", 14)
-	_tableau_row.alignment = BoxContainer.ALIGNMENT_BEGIN
+	# Explicit-geometry tableau area (NOT a container): column x positions
+	# are computed from card width + gap, so hit-testing and dragging map
+	# a pointer position to a column arithmetically. This replaces the old
+	# HBoxContainer arrangement behind the leftmost-column mis-taps.
+	_tableau_row = Control.new()
+	_tableau_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_tableau_row.custom_minimum_size = Vector2(0, 260)
 	root.add_child(_tableau_row)
+
+	_drag_layer = Control.new()
+	_drag_layer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_drag_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_drag_layer)
 
 	var shop_holder: CenterContainer = CenterContainer.new()
 	shop_holder.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -201,8 +226,6 @@ func _apply_responsive_layout() -> void:
 	_overlap = _card_size.y * 0.26
 	if _top_row != null:
 		_top_row.add_theme_constant_override("separation", int(_gap))
-	if _tableau_row != null:
-		_tableau_row.add_theme_constant_override("separation", int(_gap))
 	var narrow: bool = vw < 640.0
 	if _title_label != null:
 		_title_label.add_theme_font_size_override("font_size", 19 if narrow else 26)
@@ -219,12 +242,19 @@ func _start_round() -> void:
 	_selection = {}
 	_overlay.visible = false
 	board.wild_low = run.has_upgrade("wild_low")
-	board.setup(run.max_rank, run.rng, run.extra_columns(), run.redeals_for_round(), run.enhancement_assignments)
+	var band: Dictionary = run.act_board_config()
+	board.setup(run.max_rank, run.rng, run.extra_columns(), run.redeals_for_round(), run.enhancement_assignments, band["wall_specs"], int(band.get("bury", 0)))
 	_refresh()
 	_refresh_header()
+	print("[metrics] Act %d band=%s walls=%d bury=%d live_moves=%d redeals=%d" % [
+		run.ante, str(band["band"]), board.walls.size(), int(band.get("bury", 0)),
+		board.count_candidate_moves(), board.redeals_left])
 	var twist2: Dictionary = run.boss_twist()
+	var wall_note: String = _walls_blurb()
 	if not twist2.is_empty():
-		_message("THE GRAND ILLUSION BEGINS: %s - %s" % [str(twist2["name"]), str(twist2["desc"])])
+		_message("THE GRAND ILLUSION BEGINS: %s - %s%s" % [str(twist2["name"]), str(twist2["desc"]), wall_note])
+	elif wall_note != "":
+		_message("Act %d. %s" % [run.ante, wall_note.strip_edges()])
 
 func _refresh_header() -> void:
 	if run == null:
@@ -259,6 +289,9 @@ func _refresh_header() -> void:
 		var lv: int = run.rank_level(r)
 		rank_parts.append("%s Lv%d%s" % [RankSystem.short_label(r), lv, "*" if lv > 1 else ""])
 	_ranks_label.text = "Cast of ranks: " + "  ".join(rank_parts)
+	if _patterns_label != null:
+		var wall_line: String = _walls_blurb()
+		_patterns_label.text = run.patterns_text() + wall_line
 	if run.has_upgrade("peek_stock") and not board.stock.is_empty():
 		var peek: Array[String] = []
 		for i in range(maxi(0, board.stock.size() - 3), board.stock.size()):
@@ -274,6 +307,7 @@ func _message(text: String) -> void:
 
 func _refresh() -> void:
 	_apply_responsive_layout()
+	_dest_views.clear()
 	for child in _top_row.get_children():
 		_top_row.remove_child(child)
 		child.queue_free()
@@ -290,7 +324,7 @@ func _refresh() -> void:
 		# Show a face-down card as the stock back (its identity stays hidden).
 		stock_view = CardView.new(CardData.new(1, 0, false), _card_size)
 	stock_view.set_meta("action", "stock")
-	stock_view.clicked.connect(_on_stock_clicked)
+	stock_view.press_started.connect(_on_press_started)
 	_top_row.add_child(stock_view)
 
 	# Waste (top card only is playable)
@@ -303,9 +337,10 @@ func _refresh() -> void:
 	if not board.waste.is_empty():
 		waste_view.rank_level = run.rank_level((board.waste[board.waste.size() - 1] as CardData).rank)
 	waste_view.set_meta("source", {"type": "waste"})
-	waste_view.clicked.connect(_on_card_clicked)
-	waste_view.double_clicked.connect(_on_card_double_clicked)
+	waste_view.set_meta("dest", {"type": "waste"})
+	waste_view.press_started.connect(_on_press_started)
 	_top_row.add_child(waste_view)
+	_dest_views.append({"view": waste_view, "dest": {"type": "waste"}})
 
 	var spacer: Control = Control.new()
 	spacer.custom_minimum_size = Vector2(_gap * 1.5, 10)
@@ -326,37 +361,210 @@ func _refresh() -> void:
 			fv.rank_level = run.rank_level((pile[pile.size() - 1] as CardData).rank)
 		fv.set_meta("source", {"type": "foundation", "suit": suit})
 		fv.set_meta("dest", {"type": "foundation", "suit": suit})
-		fv.clicked.connect(_on_card_clicked)
-		fv.double_clicked.connect(_on_card_double_clicked)
+		fv.press_started.connect(_on_press_started)
 		_top_row.add_child(fv)
+		_dest_views.append({"view": fv, "dest": {"type": "foundation", "suit": suit}})
 
-	# Tableau
+	# Tableau: cards are direct children at explicit x positions (column i
+	# starts at i * (card width + gap)). Taps and drops resolve the column
+	# from that geometry via SolitaireBoard.column_at_x, so a left-edge
+	# press cannot be delivered to the rightmost column by container order.
+	var tallest: float = _card_size.y
 	for i in range(board.tableau.size()):
 		var pile2: Array = board.tableau[i]
-		var col: Control = Control.new()
-		col.custom_minimum_size = Vector2(_card_size.x, _card_size.y + _overlap * float(maxi(0, pile2.size() - 1)))
-		_tableau_row.add_child(col)
+		var x: float = float(i) * (_card_size.x + _gap)
+		var walled: bool = board.is_walled(i)
+		var wall: Dictionary = board.wall_at(i)
 		if pile2.is_empty():
 			var empty: CardView = CardView.new(null, _card_size)
+			empty.position = Vector2(x, 0)
 			empty.placeholder_text = "DROP"
 			empty.set_meta("dest", {"type": "tableau", "index": i})
-			empty.clicked.connect(_on_card_clicked)
-			col.add_child(empty)
+			empty.press_started.connect(_on_press_started)
+			_tableau_row.add_child(empty)
+			_dest_views.append({"view": empty, "dest": {"type": "tableau", "index": i}})
 			continue
 		for k in range(pile2.size()):
 			var cv: CardView = CardView.new(pile2[k], _card_size)
-			cv.position = Vector2(0, _overlap * float(k))
+			cv.position = Vector2(x, _overlap * float(k))
 			cv.rank_level = run.rank_level((pile2[k] as CardData).rank)
 			cv.set_meta("source", {"type": "tableau", "index": i, "start": k})
 			cv.set_meta("dest", {"type": "tableau", "index": i})
+			if walled and k == pile2.size() - 1:
+				cv.wall_text = str(wall.get("name", "WALL"))
+				cv.wall_sub = _wall_how(wall)
 			if _selection.get("type", "") == "tableau" and int(_selection.get("index", -1)) == i and int(_selection.get("start", -1)) == k:
 				cv.selected = true
-			cv.clicked.connect(_on_card_clicked)
-			cv.double_clicked.connect(_on_card_double_clicked)
-			col.add_child(cv)
+			cv.press_started.connect(_on_press_started)
+			_tableau_row.add_child(cv)
+			_dest_views.append({"view": cv, "dest": {"type": "tableau", "index": i}})
+		tallest = maxf(tallest, _overlap * float(pile2.size() - 1) + _card_size.y)
+	_tableau_row.custom_minimum_size = Vector2(0, tallest)
 	_refresh_header()
 
 # ---------------------------------------------------------------- input
+
+func _walls_blurb() -> String:
+	if board == null or board.walls.is_empty():
+		return ""
+	var parts: Array[String] = []
+	var keys: Array = board.walls.keys()
+	keys.sort()
+	for ci in keys:
+		var w: Dictionary = board.wall_at(int(ci))
+		parts.append("col %d %s (%s)" % [int(ci) + 1, str(w.get("name", "Wall")), _wall_how(w)])
+	return " Walls: " + "; ".join(parts) + "."
+
+func _wall_how(wall: Dictionary) -> String:
+	match str(wall.get("kind", "")):
+		"brick":
+			return "crack with any Pattern"
+		"curtain":
+			return "a Pattern lifts it and flips the card behind"
+		"iron":
+			return "play a Jack or higher to a finale pile"
+		"cracked":
+			return "%d/3 finale plays" % int(wall.get("cracks", 0))
+	return "sealed"
+
+func _source_key(src: Dictionary) -> String:
+	return "%s:%d:%d:%d" % [str(src.get("type", "")), int(src.get("index", -1)), int(src.get("start", -1)), int(src.get("suit", -1))]
+
+func _on_press_started(view: CardView, global_pos: Vector2) -> void:
+	if _dragging:
+		return
+	_drag_candidate = {"view": view}
+	_drag_press_pos = global_pos
+	_drag_source_view = view
+
+func _pointer_pos(event: InputEvent) -> Vector2:
+	if event is InputEventMouse:
+		return (event as InputEventMouse).position
+	if event is InputEventScreenDrag:
+		return (event as InputEventScreenDrag).position
+	if event is InputEventScreenTouch:
+		return (event as InputEventScreenTouch).position
+	return get_global_mouse_position()
+
+func _input(event: InputEvent) -> void:
+	if _drag_candidate.is_empty() and not _dragging:
+		return
+	var is_move: bool = event is InputEventMouseMotion or event is InputEventScreenDrag
+	var is_release: bool = false
+	if event is InputEventMouseButton:
+		var mb: InputEventMouseButton = event
+		is_release = mb.button_index == MOUSE_BUTTON_LEFT and not mb.pressed
+	elif event is InputEventScreenTouch:
+		is_release = not (event as InputEventScreenTouch).pressed
+	if is_move and not _dragging and not _drag_candidate.is_empty():
+		if _pointer_pos(event).distance_to(_drag_press_pos) >= 14.0:
+			_begin_drag()
+	elif is_move and _dragging:
+		_move_drag(_pointer_pos(event))
+	elif is_release:
+		if _dragging:
+			_end_drag(_pointer_pos(event))
+		elif not _drag_candidate.is_empty():
+			_finish_tap(_drag_source_view)
+		_drag_candidate = {}
+
+func _begin_drag() -> void:
+	var view: CardView = _drag_source_view
+	if view == null or not view.has_meta("source"):
+		_drag_candidate = {}
+		return
+	var src: Dictionary = view.get_meta("source")
+	if str(src.get("type", "")) == "tableau" and board.is_walled(int(src.get("index", -1))):
+		_drag_candidate = {}
+		_message("Sealed — %s." % _wall_how(board.wall_at(int(src.get("index", -1)))))
+		return
+	var moving: Array = board._peek_source(src)
+	if moving.is_empty():
+		_drag_candidate = {}
+		return
+	_dragging = true
+	_selection = src
+	_drag_offset = _drag_press_pos - view.global_position
+	view.modulate.a = 0.35
+	for i in range(moving.size()):
+		var ghost: CardView = CardView.new(moving[i], _card_size)
+		ghost.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		ghost.rank_level = run.rank_level((moving[i] as CardData).rank)
+		ghost.position = view.global_position + Vector2(0, _overlap * float(i))
+		ghost.z_index = 100 + i
+		_drag_layer.add_child(ghost)
+	_highlight_legal(moving[0], moving.size() == 1)
+	_move_drag(_drag_press_pos)
+
+func _move_drag(pointer: Vector2) -> void:
+	var kids: Array = _drag_layer.get_children()
+	for i in range(kids.size()):
+		(kids[i] as Control).global_position = pointer - _drag_offset + Vector2(0, _overlap * float(i))
+
+func _highlight_legal(bottom: CardData, single: bool) -> void:
+	for entry in _dest_views:
+		var dest: Dictionary = entry["dest"]
+		var view: CardView = entry["view"]
+		var ok: bool = false
+		if str(dest.get("type", "")) == "foundation":
+			ok = single and int(dest.get("suit", -1)) == bottom.suit and board.can_place_on_foundation(bottom)
+		elif str(dest.get("type", "")) == "tableau":
+			var di: int = int(dest.get("index", -1))
+			ok = not board.is_walled(di) and board.can_place_on_tableau(bottom, board.tableau[di])
+			if ok and _selection.get("type", "") == "tableau" and int(_selection.get("index", -2)) == di:
+				ok = false
+		if ok:
+			view.highlighted = true
+			view.queue_redraw()
+
+func _end_drag(pointer: Vector2) -> void:
+	var dest: Dictionary = _dest_under(pointer)
+	_dragging = false
+	_drag_candidate = {}
+	for child in _drag_layer.get_children():
+		_drag_layer.remove_child(child)
+		child.queue_free()
+	if dest.is_empty():
+		_message("Dropped back.")
+		_refresh()
+		return
+	_try_move_selection_to(dest)
+
+func _dest_under(pointer: Vector2) -> Dictionary:
+	# Prefer the card actually under the pointer (top-most last).
+	var found: Dictionary = {}
+	for entry in _dest_views:
+		var view: CardView = entry["view"]
+		if view.get_global_rect().has_point(pointer):
+			found = entry["dest"]
+	if not found.is_empty() and str(found.get("type", "")) != "waste":
+		return found
+	# Otherwise map x onto a tableau column, including the empty space under a short pile.
+	if _tableau_row != null:
+		var local: Vector2 = pointer - _tableau_row.global_position
+		var ci: int = SolitaireBoard.column_at_x(local.x, _card_size.x, _gap, board.tableau.size())
+		if ci >= 0 and local.y >= -8.0:
+			return {"type": "tableau", "index": ci}
+	return {}
+
+func _finish_tap(view: CardView) -> void:
+	if view == null or not is_instance_valid(view):
+		return
+	if str(view.get_meta("action", "")) == "stock":
+		_last_tap_msec = 0
+		_on_stock_clicked(view)
+		return
+	var src: Dictionary = view.get_meta("source", {})
+	var now: int = Time.get_ticks_msec()
+	var key: String = _source_key(src)
+	if now - _last_tap_msec < 450 and key == _last_tap_key and not src.is_empty():
+		_last_tap_msec = 0
+		_last_tap_key = ""
+		_on_card_double_clicked(view)
+	else:
+		_last_tap_msec = now
+		_last_tap_key = key
+		_on_card_clicked(view)
 
 func _on_stock_clicked(_view: CardView) -> void:
 	if not run.round_active:
@@ -364,6 +572,7 @@ func _on_stock_clicked(_view: CardView) -> void:
 	_selection = {}
 	if not board.stock.is_empty():
 		board.draw_stock()
+		run.note_draw()
 		run.score_for_event("draw")
 		_message("Drew %s." % (board.waste[board.waste.size() - 1] as CardData).display_name())
 	elif board.recycle_waste():
@@ -394,13 +603,25 @@ func _on_card_clicked(view: CardView) -> void:
 		# Fall through: maybe they meant to select this card instead.
 	if view.has_meta("source"):
 		var src: Dictionary = view.get_meta("source")
+		if str(src.get("type", "")) == "tableau" and board.is_walled(int(src.get("index", -1))):
+			_selection = {}
+			_message("That column is sealed — %s." % _wall_how(board.wall_at(int(src.get("index", -1)))))
+			_refresh()
+			return
+		# Trust geometry over the view's stored column: the card under the
+		# pointer's x is the one the player aimed at.
+		if str(src.get("type", "")) == "tableau":
+			var aimed: int = SolitaireBoard.column_at_x(view.get_global_rect().get_center().x - _tableau_row.global_position.x, _card_size.x, _gap, board.tableau.size())
+			if aimed >= 0 and aimed != int(src.get("index", -1)):
+				src = {"type": "tableau", "index": aimed, "start": int(src.get("start", 0))}
+				src["start"] = mini(int(src["start"]), board.tableau[aimed].size() - 1)
 		var moving: Array = board._peek_source(src)
 		if moving.is_empty():
 			_selection = {}
 			_message("Nothing playable there.")
 		else:
 			_selection = src
-			_message("Selected %s. Click a destination pile." % (moving[0] as CardData).display_name())
+			_message("Selected %s. Tap a pile, drag it, or double-tap for the best spot." % (moving[0] as CardData).display_name())
 	else:
 		_selection = {}
 	_refresh()
@@ -409,18 +630,31 @@ func _on_card_double_clicked(view: CardView) -> void:
 	if not run.round_active or not view.has_meta("source"):
 		return
 	var src: Dictionary = view.get_meta("source")
-	var result: Dictionary = board.try_auto_foundation(src)
-	if bool(result.get("ok", false)):
-		_selection = {}
-		_apply_move_scoring(result, src)
-		if _score_msg == "":
-			_message("Sent %s to its finale pile." % (result["card"] as CardData).display_name())
-		else:
-			_message(_score_msg)
-		_refresh()
-		_check_end_conditions()
-	else:
-		_message("That card cannot take its finale bow yet.")
+	if str(src.get("type", "")) == "tableau" and board.is_walled(int(src.get("index", -1))):
+		_message("That column is sealed — %s." % _wall_how(board.wall_at(int(src.get("index", -1)))))
+		return
+	var best: Dictionary = board.find_best_move(src)
+	if best.is_empty():
+		_message("No good spot for that card yet.")
+		return
+	_selection = src
+	var reason: String = str(best.get("reason", "tableau"))
+	if not _try_move_selection_to(best["dest"]):
+		return
+	var card_name: String = ""
+	if _score_msg != "":
+		card_name = _score_msg
+	match reason:
+		"foundation":
+			_message("Double-tap sent it to its finale pile. " + card_name)
+		"reveal":
+			_message("Parked it to reveal the card beneath. " + card_name)
+		"free_column":
+			_message("Moved it and freed the column. " + card_name)
+		"pattern":
+			_message("Moved it into a Pattern. " + card_name)
+		_:
+			_message("Moved it to the best open spot. " + card_name)
 
 func _try_move_selection_to(dest: Dictionary) -> bool:
 	var src: Dictionary = _selection
@@ -429,7 +663,9 @@ func _try_move_selection_to(dest: Dictionary) -> bool:
 		_message("Illegal move.")
 		return false
 	_selection = {}
+	_pending_dest = dest
 	_apply_move_scoring(result, src)
+	_pending_dest = {}
 	_message(_score_msg if _score_msg != "" else "Moved %s." % (result["card"] as CardData).display_name())
 	_refresh()
 	_check_end_conditions()
@@ -457,7 +693,64 @@ func _apply_move_scoring(result: Dictionary, src: Dictionary) -> void:
 	if bool(result.get("flipped", false)):
 		var fpts: int = run.score_for_event("flip")
 		_score_msg += " Reveal +%d applause." % fpts
-		_message("Revealed a hidden card! +%d applause." % fpts)
+		if run.register_flip():
+			var epts: int = run.register_pattern("excavation")
+			_score_msg += " EXCAVATION +%d!" % epts
+	_score_msg += _award_followups(result, src)
+
+func _award_followups(result: Dictionary, src: Dictionary) -> String:
+	var bits: Array[String] = []
+	var cracked_a_pattern: bool = false
+	if bool(result.get("to_foundation", false)):
+		for pid in run.register_foundation_play(result["card"], board):
+			var pts: int = run.register_pattern(str(pid))
+			bits.append("%s +%d" % [PatternDB.display_name(str(pid)), pts])
+			cracked_a_pattern = true
+	var dest_col: int = -1
+	if str(result.get("dest_type", "")) == "tableau":
+		dest_col = int(result.get("dest_index", -1))
+	# Destination column isn't on the move result; recover it from the board
+	# by scanning for the moved card when the caller set it. The try_move
+	# path below passes dest via _pending_dest.
+	if _pending_dest.get("type", "") == "tableau":
+		dest_col = int(_pending_dest.get("index", -1))
+	if dest_col >= 0 and dest_col < board.tableau.size():
+		for inst in PatternDB.tableau_instances(board.tableau[dest_col]):
+			var sig: String = "%s|%s" % [str(inst["id"]), str(inst["signature"])]
+			if run.awarded_tableau_patterns.has(sig):
+				continue
+			run.awarded_tableau_patterns[sig] = true
+			var tpts: int = run.register_pattern(str(inst["id"]))
+			bits.append("%s +%d" % [PatternDB.display_name(str(inst["id"])), tpts])
+			cracked_a_pattern = true
+	if str(src.get("type", "")) == "tableau":
+		var sp: Array = board.tableau[int(src.get("index", 0))]
+		if sp.is_empty():
+			var bpts: int = run.register_pattern("breakout")
+			bits.append("Breakout +%d" % bpts)
+			cracked_a_pattern = true
+			if run.book_done_this_round:
+				var hpts: int = run.register_pattern("housekeeping")
+				bits.append("Full House-keeping +%d" % hpts)
+	if cracked_a_pattern:
+		bits.append_array(_open_walls(board.register_wall_event("pattern")))
+	if bool(result.get("to_foundation", false)):
+		bits.append_array(_open_walls(board.register_wall_event("foundation", result["card"])))
+	if bits.is_empty():
+		return ""
+	return " " + " · ".join(bits)
+
+func _open_walls(opened: Array) -> Array[String]:
+	var bits: Array[String] = []
+	for o in opened:
+		run.metrics["walls_opened"] = int(run.metrics["walls_opened"]) + 1
+		var kind: String = str(o["kind"])
+		bits.append("%s down on column %d" % [kind.capitalize(), int(o["column"]) + 1])
+		if bool(o.get("flipped", false)):
+			var fpts: int = run.score_for_event("flip")
+			bits.append("curtain reveal +%d" % fpts)
+			print("[metrics] wall opened kind=%s col=%d" % [kind, int(o["column"])])
+	return bits
 
 # ---------------------------------------------------------------- flow
 
@@ -474,6 +767,7 @@ func _check_end_conditions() -> void:
 		# Auto-prompt is friendlier for a prototype: treat meeting target as a win
 		# only via the button, so players can push their luck. Nothing to do here.
 	if not board.has_any_legal_move():
+		run.note_dead_board()
 		run.fail_run()
 		_show_overlay("THE TRICK FALLS FLAT...", "No legal moves remain in Act %d.\nFinal applause this trick: %d / %d target.\nHighest deck rank: %s. The crowd shuffles out..." % [run.ante, run.score, run.target, RankSystem.full_name(run.max_rank)], ["New Run"])
 
@@ -504,8 +798,27 @@ func _on_shop_done() -> void:
 	_message("Act %d begins. Applause target %d. Deck: A-%s (%d cards)." % [run.ante, run.target, RankSystem.full_name(run.max_rank), board.total_cards()])
 
 func _on_hint() -> void:
+	var sources: Array = []
+	if not board.waste.is_empty():
+		sources.append({"type": "waste"})
+	for i in range(board.tableau.size()):
+		if board.is_walled(i):
+			continue
+		var pile: Array = board.tableau[i]
+		for start in range(pile.size() - 1, -1, -1):
+			if (pile[start] as CardData).face_up:
+				sources.append({"type": "tableau", "index": i, "start": start})
+				break
+	for src in sources:
+		var best: Dictionary = board.find_best_move(src)
+		if best.is_empty():
+			continue
+		var moving: Array = board._peek_source(src)
+		var who: String = (moving[0] as CardData).display_name() if not moving.is_empty() else "that card"
+		_message("Hint: %s — %s (%d live moves)." % [who, str(best.get("reason", "move")), board.count_candidate_moves()])
+		return
 	if board.has_any_legal_move():
-		_message("Hint: a legal move exists. Check waste/tableau tops against the finale piles (Ace first) and descending alternating colours.")
+		_message("Hint: draw from the stock. %d live moves." % board.count_candidate_moves())
 	else:
 		_message("Hint: no legal moves remain.")
 

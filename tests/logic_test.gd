@@ -133,6 +133,81 @@ func _init() -> void:
 	_check(UpgradeDB.UPGRADES.size() >= 14, "expanded relic pool (got %d)" % UpgradeDB.UPGRADES.size())
 	_check(EnhancementDB.ENHANCEMENTS.size() >= 4, "at least 4 enhancements defined")
 
+
+	# --- Patterns: Natural Run / Rope / best_tableau_score ---
+	var alt_run: Array = [
+		CardData.new(7, 0, true), CardData.new(6, 1, true),
+		CardData.new(5, 0, true), CardData.new(4, 1, true),
+	]
+	var alts: Array = PatternDB.tableau_instances(alt_run)
+	var has_natural: bool = false
+	for inst in alts:
+		if str(inst["id"]) == "natural_run":
+			has_natural = true
+	_check(has_natural, "alternating 4-stack is a Natural Run")
+	_check(PatternDB.best_tableau_score(alt_run) >= 60, "Natural Run has a positive tableau score")
+	var rope_run: Array = [
+		CardData.new(5, 1, true), CardData.new(4, 1, true), CardData.new(3, 1, true),
+	]
+	var ropes: Array = PatternDB.tableau_instances(rope_run)
+	var has_rope: bool = false
+	for inst2 in ropes:
+		if str(inst2["id"]) == "rope":
+			has_rope = true
+	_check(has_rope, "same-suit descending 3-stack is a Silk Rope")
+
+	# --- Foundation patterns: Mirror Pair + Book ---
+	var run4: RunManager = RunManager.new()
+	run4.rng.seed = 55
+	run4.start_new_run()
+	var board3: SolitaireBoard = SolitaireBoard.new()
+	board3.setup(5, run4.rng, 0, 1)
+	board3.foundations[0] = [CardData.new(1, 0, true)]
+	board3.foundations[1] = [CardData.new(1, 1, true)]
+	board3.foundations[2] = [CardData.new(1, 2, true)]
+	board3.foundations[3] = [CardData.new(1, 3, true)]
+	var book_ids: Array = run4.register_foundation_play(CardData.new(1, 3), board3)
+	_check(book_ids.has("book"), "fourth Ace home completes Book of Four (got %s)" % str(book_ids))
+	run4.register_foundation_play(CardData.new(2, 0), board3)
+	var mirror: Array = run4.register_foundation_play(CardData.new(2, 1), board3)
+	_check(mirror.has("mirror_pair"), "same rank opposite colours is Mirror Pair")
+
+	# --- Walls: brick cracks on pattern, never seals every column ---
+	var board4: SolitaireBoard = SolitaireBoard.new()
+	var wrng: RandomNumberGenerator = RandomNumberGenerator.new()
+	wrng.seed = 7
+	board4.setup(5, wrng, 0, 1, {}, [{"kind": "brick", "name": "Brick Wall"}])
+	_check(board4.walls.size() == 1, "one brick wall placed")
+	_check(not board4.is_walled(0), "wall never seals column 0")
+	var sealed: int = -1
+	for ci in board4.walls.keys():
+		sealed = int(ci)
+	_check(sealed > 0, "sealed column is not the leftmost")
+	var opened: Array = board4.register_wall_event("pattern")
+	_check(opened.size() == 1 and not board4.is_walled(sealed), "pattern cracks the Brick Wall")
+
+	# --- find_best_move prefers foundation ---
+	var board5: SolitaireBoard = SolitaireBoard.new()
+	board5.setup(5, wrng, 0, 1)
+	board5.waste = [CardData.new(1, 0, true)]
+	board5.foundations[0] = []
+	var best: Dictionary = board5.find_best_move({"type": "waste"})
+	_check(str(best.get("reason", "")) == "foundation", "find_best_move prefers foundation for an Ace on waste")
+
+	# --- Act bands change the board ---
+	_check(run4.act_board_config(1)["wall_specs"].is_empty(), "Act 1 is a clean board")
+	_check(run4.act_board_config(3)["wall_specs"].size() == 1, "Act 3 raises the first wall")
+	_check(run4.act_board_config(6)["wall_specs"].size() == 2, "Act 6 raises two walls")
+	_check(int(run4.act_board_config(4).get("bury", 0)) == 1, "Act 4 buries one extra face-down card")
+	_check(SolitaireBoard.column_at_x(20.0, 40.0, 6.0, 4) == 0, "column_at_x leftmost maps to 0")
+	_check(SolitaireBoard.column_at_x(20.0 + 3.0 * 46.0, 40.0, 6.0, 4) == 3, "column_at_x rightmost maps to last")
+	_check(SolitaireBoard.column_at_x(20.0, 40.0, 6.0, 4) != 3, "leftmost never maps to rightmost")
+
+	_check(UpgradeDB.UPGRADES.size() >= 17, "pattern props expanded the relic pool (got %d)" % UpgradeDB.UPGRADES.size())
+	_check(PatternDB.PATTERNS.size() >= 10, "pattern table has the starting set")
+
+	run4.free()
+
 	run2.free()
 	run3.free()
 	run.free()

@@ -6,6 +6,7 @@ extends Control
 
 signal clicked(view: CardView)
 signal double_clicked(view: CardView)
+signal press_started(view: CardView, global_pos: Vector2)
 
 const W: float = 86.0
 const H: float = 120.0
@@ -16,6 +17,9 @@ var placeholder_suit: int = -1
 var rank_level: int = 1 # RunManager rank level, shown as pips/badge when > 1
 var selected: bool = false
 var dimmed: bool = false
+var highlighted: bool = false # legal drop target during a drag
+var wall_text: String = ""    # non-empty = this card is capped by a Wall
+var wall_sub: String = ""
 
 var display_size: Vector2 = Vector2(W, H)
 var _last_tap_msec: int = 0
@@ -36,12 +40,10 @@ func set_card(p_card: CardData) -> void:
 	card = p_card
 	queue_redraw()
 
-## Handles mouse clicks AND raw screen touches. Project settings enable
-## emulate-mouse-from-touch, so a touch can arrive as both event types;
-## presses within 80 ms are de-duplicated. Double-tap is detected manually
-## (<450 ms) in addition to the engine's double_click flag, because touch
-## double-click reporting varies across phones / web browsers.
-## No hover, drag-only, or right-click input is used anywhere in the game.
+## Press only. Main owns tap vs double-tap vs drag, because a click that
+## fires on press selects (and rebuilds) the board before a drag can start.
+## Touch and mouse both arrive (emulate_mouse_from_touch); presses within
+## 80 ms are de-duplicated.
 func _gui_input(event: InputEvent) -> void:
 	var is_press: bool = false
 	if event is InputEventMouseButton:
@@ -56,12 +58,7 @@ func _gui_input(event: InputEvent) -> void:
 	if now - _last_processed_msec < 80:
 		return
 	_last_processed_msec = now
-	if now - _last_tap_msec < 450:
-		_last_tap_msec = 0
-		double_clicked.emit(self)
-	else:
-		_last_tap_msec = now
-		clicked.emit(self)
+	press_started.emit(self, get_global_mouse_position())
 
 func _draw() -> void:
 	var rect: Rect2 = Rect2(Vector2.ZERO, size)
@@ -139,6 +136,27 @@ func _draw() -> void:
 	elif RankSystem.tier(card.rank) == 1:
 		draw_string(font, Vector2(3, size.y - 6), RankSystem.full_name(card.rank), HORIZONTAL_ALIGNMENT_CENTER, size.x - 6.0, int(clampf(10.0 * s, 8.0, 11.0)), Color(0.55, 0.38, 0.05))
 	_draw_markers(s)
+	if highlighted:
+		var hb: StyleBoxFlat = StyleBoxFlat.new()
+		hb.bg_color = Color(1, 0.85, 0.2, 0.18)
+		hb.border_color = Color(1.0, 0.85, 0.2)
+		hb.set_border_width_all(3)
+		hb.set_corner_radius_all(8)
+		draw_style_box(hb, rect)
+	if wall_text != "":
+		# Brick band across the card: the column behind it is sealed.
+		var band: Rect2 = Rect2(2, size.y * 0.38, size.x - 4, size.y * 0.30)
+		var wb: StyleBoxFlat = StyleBoxFlat.new()
+		wb.bg_color = Color(0.16, 0.10, 0.10, 0.92)
+		wb.border_color = Color(0.55, 0.30, 0.20)
+		wb.set_border_width_all(2)
+		wb.set_corner_radius_all(4)
+		draw_style_box(wb, band)
+		draw_line(band.position + Vector2(0, band.size.y * 0.5), band.position + Vector2(band.size.x, band.size.y * 0.5), Color(0.55, 0.30, 0.20), 1.5)
+		var wf: Font = get_theme_default_font()
+		draw_string(wf, Vector2(2, band.position.y + 13.0), wall_text, HORIZONTAL_ALIGNMENT_CENTER, size.x - 4.0, int(clampf(11.0 * _scale(), 8.0, 12.0)), Color(1.0, 0.75, 0.55))
+		if wall_sub != "":
+			draw_string(wf, Vector2(2, band.position.y + 25.0), wall_sub, HORIZONTAL_ALIGNMENT_CENTER, size.x - 4.0, int(clampf(9.0 * _scale(), 7.0, 10.0)), Color(1, 1, 1, 0.75))
 
 ## Suits are drawn from circles/polygons (no font glyphs): the suit
 ## characters in the default font are missing in web exports and would
