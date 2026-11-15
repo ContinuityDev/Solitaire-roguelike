@@ -6,6 +6,7 @@ extends PanelContainer
 signal continued
 signal used_action(id: String)
 signal rematch
+signal title_pressed
 
 var _title: Label
 var _body: VBoxContainer
@@ -13,6 +14,7 @@ var _preview: Label
 var _log: Label
 var _action_row: HFlowContainer
 var _continue_btn: Button
+var _title_btn: Button
 var _mode: String = "round"
 
 func _ready() -> void:
@@ -64,6 +66,12 @@ func _ready() -> void:
 	_continue_btn.custom_minimum_size = Vector2(0, 52)
 	_continue_btn.pressed.connect(_on_continue)
 	outer.add_child(_continue_btn)
+	_title_btn = Button.new()
+	_title_btn.text = "Title"
+	_title_btn.custom_minimum_size = Vector2(0, 44)
+	_title_btn.visible = false
+	_title_btn.pressed.connect(func() -> void: visible = false; title_pressed.emit())
+	outer.add_child(_title_btn)
 
 func present_round(title_text: String, rows: Array, preview: String, log_text: String, action_ids: Array) -> void:
 	_mode = "round"
@@ -71,6 +79,8 @@ func present_round(title_text: String, rows: Array, preview: String, log_text: S
 	_preview.text = preview
 	_log.text = log_text
 	_continue_btn.text = "Continue"
+	if _title_btn:
+		_title_btn.visible = false
 	_fill_rows(rows)
 	_fill_actions(action_ids)
 	_size_to_view()
@@ -82,6 +92,8 @@ func present_game_over(title_text: String, rows: Array, body: String) -> void:
 	_preview.text = body
 	_log.text = ""
 	_continue_btn.text = "New Run"
+	if _title_btn:
+		_title_btn.visible = true
 	_fill_rows(rows)
 	_fill_actions([])
 	_size_to_view()

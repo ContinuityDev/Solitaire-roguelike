@@ -1,6 +1,6 @@
 extends Control
 
-## President vs five AIs. Seat 0 is you.
+## President. Title → Solo vs AIs, or a local hotseat lobby.
 
 signal trade_confirmed
 
@@ -42,6 +42,14 @@ var _trade_picks: Array = []
 var _trade_panel: PanelContainer
 var _trade_prompt: Label
 var _trade_confirm: Button
+var lobby: LobbyConfig
+var _view_seat: int = 0
+var _title_view: TitleView
+var _lobby_view: LobbyView
+var _handoff: HandoffView
+var _shop_queue: Array = []
+var _desk_phase: String = ""
+var _title_btn: Button
 
 const AI_COLORS: Array = [
 	Color(0.55, 0.22, 0.22),
@@ -59,8 +67,8 @@ func _ready() -> void:
 	run.changed.connect(_refresh_hud)
 	get_tree().root.size_changed.connect(func() -> void: if _ui_ready: _refresh())
 	_ui_ready = true
-	run.start_new_run()
-	_start_round()
+	lobby = LobbyConfig.solo()
+	_show_title()
 
 func _build_ui() -> void:
 	var bg: ColorRect = ColorRect.new()
@@ -142,8 +150,13 @@ func _build_ui() -> void:
 	var restart: Button = Button.new()
 	restart.text = "New Run"
 	restart.custom_minimum_size = Vector2(90, 44)
-	restart.pressed.connect(func() -> void: run.start_new_run(); _start_round())
+	restart.pressed.connect(_restart_run)
 	_btn_row.add_child(restart)
+	_title_btn = Button.new()
+	_title_btn.text = "Title"
+	_title_btn.custom_minimum_size = Vector2(90, 44)
+	_title_btn.pressed.connect(_show_title)
+	_btn_row.add_child(_title_btn)
 	_action_row = HFlowContainer.new()
 	_action_row.add_theme_constant_override("h_separation", 6)
 	root.add_child(_action_row)
@@ -168,7 +181,8 @@ func _build_ui() -> void:
 	_results.visibility_changed.connect(func() -> void: resh.visible = _results.visible)
 	_results.continued.connect(_on_results_continued)
 	_results.used_action.connect(_on_results_action)
-	_results.rematch.connect(func() -> void: run.start_new_run(); _start_round())
+	_results.rematch.connect(_restart_run)
+	_results.title_pressed.connect(_show_title)
 	_trade_panel = PanelContainer.new()
 	_trade_panel.visible = false
 	_trade_panel.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
@@ -233,6 +247,97 @@ func _build_ui() -> void:
 	_ai_timer.wait_time = 0.45
 	_ai_timer.timeout.connect(_ai_act)
 	add_child(_ai_timer)
+	_handoff = HandoffView.new()
+	add_child(_handoff)
+	_lobby_view = LobbyView.new()
+	_lobby_view.visible = false
+	add_child(_lobby_view)
+	_lobby_view.started.connect(_on_lobby_started)
+	_lobby_view.cancelled.connect(_show_title)
+	_title_view = TitleView.new()
+	add_child(_title_view)
+	_title_view.solo_pressed.connect(_on_solo)
+	_title_view.lobby_pressed.connect(_on_open_lobby)
+
+func _is_human(seat: int) -> bool:
+	return lobby != null and lobby.is_human(seat)
+
+func _is_hotseat() -> bool:
+	return lobby != null and lobby.is_hotseat()
+
+func _show_title() -> void:
+	_ai_timer.stop()
+	_busy = false
+	_trade_waiting = false
+	_trade_panel.visible = false
+	if _shop:
+		_shop.visible = false
+	if _results:
+		_results.visible = false
+	if _handoff:
+		_handoff.visible = false
+	if _lobby_view:
+		_lobby_view.visible = false
+	if _overlay:
+		_overlay.visible = false
+	if _title_view:
+		_title_view.visible = true
+
+func _on_solo() -> void:
+	lobby = LobbyConfig.solo()
+	_title_view.visible = false
+	_begin_play()
+
+func _on_open_lobby() -> void:
+	_title_view.visible = false
+	_lobby_view.present(true)
+
+func _on_lobby_started(cfg: LobbyConfig) -> void:
+	lobby = cfg
+	_begin_play()
+
+func _begin_play() -> void:
+	_title_view.visible = false
+	_lobby_view.visible = false
+	_view_seat = int(lobby.human_seats()[0]) if not lobby.human_seats().is_empty() else 0
+	run.start_new_run(lobby)
+	_start_round()
+
+func _restart_run() -> void:
+	if _title_view.visible:
+		return
+	if lobby == null:
+		lobby = LobbyConfig.solo()
+	_begin_play()
+
+func _other_seats() -> Array:
+	var out: Array = []
+	var n: int = lobby.seat_count if lobby != null else 6
+	for s in range(n):
+		if s != _view_seat:
+			out.append(s)
+	return out
+
+func _plaque_for(seat: int) -> Control:
+	var others: Array = _other_seats()
+	var i: int = others.find(seat)
+	if i < 0 or i >= _ai_plaques.size():
+		return null
+	return _ai_plaques[i]
+
+func _await_handoff(to_seat: int) -> void:
+	if not LobbyConfig.needs_handoff(lobby, _view_seat, to_seat):
+		_view_seat = to_seat
+		return
+	_selected.clear()
+	_busy = true
+	_refresh()
+	_handoff.ask(run.name_of(to_seat))
+	await _handoff.confirmed
+	_view_seat = to_seat
+	_selected.clear()
+	_busy = false
+	_refresh()
 
 func _make_ai_plaque(seat: int) -> PanelContainer:
 	var wrap: PanelContainer = PanelContainer.new()
@@ -290,12 +395,18 @@ func _make_ai_plaque(seat: int) -> PanelContainer:
 	whip.text = "?"
 	whip.custom_minimum_size = Vector2(28, 28)
 	whip.visible = false
-	var cap: int = seat
-	whip.pressed.connect(func() -> void: _whip(cap))
+	whip.set_meta("seat", seat)
+	whip.pressed.connect(func() -> void: _whip(int(whip.get_meta("seat", 1))))
 	box.add_child(whip)
 	return wrap
 
 func _start_round() -> void:
+	if _title_view:
+		_title_view.visible = false
+	if _lobby_view:
+		_lobby_view.visible = false
+	if _handoff:
+		_handoff.visible = false
 	_overlay.visible = false
 	_shop.visible = false
 	_results.visible = false
@@ -312,10 +423,10 @@ func _start_round() -> void:
 	run.apply_populist()
 	game.setup(live, run.rng, 0, 0, 0, run.lead_seat())
 	var deal_logs: Array = run.apply_deal_effects(game)
-	if game.current_player == 0:
-		_message("Round %d. Stake %d. You lead — yellow cards can be played." % [run.round_n, run.stake()])
+	if _is_human(game.current_player):
+		_message("Round %d. Stake %d. %s leads — yellow cards can be played." % [run.round_n, run.stake(), run.name_of(game.current_player)])
 	else:
-		_message("Round %d. %s leads." % [run.round_n, RunManager.NAMES[game.current_player]])
+		_message("Round %d. %s leads." % [run.round_n, run.name_of(game.current_player)])
 	if not deal_logs.is_empty():
 		for line in deal_logs:
 			run.log_event(str(line))
@@ -355,19 +466,20 @@ func _continue_turns() -> void:
 			var who: int = game.current_player
 			game.pass_turn(who)
 			_pop_pass(who)
-			_message("%s is filibustered and passes." % RunManager.NAMES[who])
+			_message("%s is filibustered and passes." % run.name_of(who))
 			_refresh()
 			_continue_turns()
 			return
 	_update_banner()
 	_pulse_turn(game.current_player)
-	if game.current_player == 0:
+	if _is_human(game.current_player):
+		await _await_handoff(game.current_player)
 		_busy = false
 		_refresh()
 		if game.lead:
-			_message("Your lead. Yellow cards are playable — tap one, then Play (or double-tap).")
+			_message("%s's lead. Yellow cards are playable — tap one, then Play (or double-tap)." % run.name_of(_view_seat))
 		else:
-			_message("Your turn. Yellow cards beat %d× %s. Double-tap to play, or Pass." % [game.trick_count, RankSystem.short_label(game.trick_rank)])
+			_message("%s's turn. Yellow cards beat %d× %s. Double-tap to play, or Pass." % [run.name_of(_view_seat), game.trick_count, RankSystem.short_label(game.trick_rank)])
 		return
 	_busy = true
 	_refresh()
@@ -377,9 +489,9 @@ func _pulse_turn(seat: int) -> void:
 	var twb: Tween = create_tween()
 	_banner.modulate = Color(1.4, 1.3, 0.7)
 	twb.tween_property(_banner, "modulate", Color.WHITE, 0.35)
-	if seat <= 0 or seat > _ai_plaques.size():
+	var wrap: Control = _plaque_for(seat)
+	if wrap == null:
 		return
-	var wrap: Control = _ai_plaques[seat - 1]
 	wrap.pivot_offset = wrap.size * 0.5
 	wrap.scale = Vector2(1.06, 1.06)
 	var tw: Tween = create_tween()
@@ -389,15 +501,15 @@ func _update_banner() -> void:
 	if game.round_over:
 		_banner.text = "Round over"
 		return
-	if game.current_player == 0:
-		_banner.text = "YOUR TURN"
+	if _is_human(game.current_player):
+		_banner.text = "YOUR TURN  ·  %s" % run.name_of(game.current_player)
 		_banner.add_theme_color_override("font_color", Color(1.0, 0.88, 0.25))
 	else:
-		_banner.text = "%s is playing…" % RunManager.NAMES[game.current_player]
+		_banner.text = "%s is playing…" % run.name_of(game.current_player)
 		_banner.add_theme_color_override("font_color", Color(0.75, 0.85, 1.0))
 
 func _ai_act() -> void:
-	if game.round_over or game.current_player == 0:
+	if game.round_over or _is_human(game.current_player):
 		_continue_turns()
 		return
 	var seat: int = game.current_player
@@ -411,7 +523,7 @@ func _ai_act() -> void:
 	if bool(choice.get("pass", false)):
 		game.pass_turn(seat)
 		_pop_pass(seat)
-		_message("%s passes." % RunManager.NAMES[seat])
+		_message("%s passes." % run.name_of(seat))
 		_refresh()
 		_continue_turns()
 		return
@@ -421,50 +533,50 @@ func _ai_act() -> void:
 	if not bool(r.get("ok", false)):
 		game.pass_turn(seat)
 		_pop_pass(seat)
-		_message("%s passes." % RunManager.NAMES[seat])
+		_message("%s passes." % run.name_of(seat))
 		_refresh()
 		_continue_turns()
 		return
 	_award_rank_gold(seat, int(combo.get("rank", 0)))
-	_message("%s plays %s." % [RunManager.NAMES[seat], str(r.get("label", ""))])
+	_message("%s plays %s." % [run.name_of(seat), str(r.get("label", ""))])
 	await _fly_from(origins, combo)
 	_refresh()
 	_continue_turns()
 
 func _on_play() -> void:
-	if _busy or game.current_player != 0 or game.round_over:
+	if _busy or game.current_player != _view_seat or not _is_human(_view_seat) or game.round_over:
 		return
 	if _selected.is_empty():
 		_message("Tap a yellow card first.")
 		return
 	var rank: int = (_selected[0] as CardData).rank
 	var combo: Dictionary = {"rank": rank, "count": _selected.size()}
-	if not game.is_legal_combo(combo, 0):
+	if not game.is_legal_combo(combo, _view_seat):
 		_message("Need %d of that rank to follow." % game.trick_count if not game.lead else "Illegal combo.")
 		return
 	var origins: Array = _selected_origins()
-	var r: Dictionary = game.play(0, combo)
+	var r: Dictionary = game.play(_view_seat, combo)
 	if not bool(r.get("ok", false)):
 		_message("Illegal play (%s)." % str(r.get("reason", "")))
 		return
 	_selected.clear()
-	_award_rank_gold(0, rank)
-	_message("You play %s." % str(r.get("label", "")))
+	_award_rank_gold(_view_seat, rank)
+	_message("%s plays %s." % [run.name_of(_view_seat), str(r.get("label", ""))])
 	_busy = true
 	await _fly_from(origins, combo)
 	_refresh()
 	_continue_turns()
 
 func _on_pass() -> void:
-	if _busy or game.current_player != 0 or game.round_over:
+	if _busy or game.current_player != _view_seat or not _is_human(_view_seat) or game.round_over:
 		return
 	if game.lead:
 		_message("You have the lead — play a yellow card.")
 		return
-	game.pass_turn(0)
+	game.pass_turn(_view_seat)
 	_selected.clear()
-	_pop_pass(0)
-	_message("You pass.")
+	_pop_pass(_view_seat)
+	_message("%s passes." % run.name_of(_view_seat))
 	_refresh()
 	_continue_turns()
 
@@ -474,14 +586,14 @@ func _on_card_press(view: CardView, _pos: Vector2) -> void:
 	if _trade_waiting:
 		_toggle_trade_pick(view.card)
 		return
-	if _busy or game.current_player != 0:
+	if _busy or game.current_player != _view_seat:
 		return
 	_select_from_card(view.card, false)
 
 func _on_card_double(view: CardView) -> void:
-	if _busy or game.current_player != 0 or view.card == null:
+	if _busy or game.current_player != _view_seat or view.card == null:
 		return
-	if not game.rank_is_legal(0, view.card.rank):
+	if not game.rank_is_legal(_view_seat, view.card.rank):
 		_select_from_card(view.card, true)
 		return
 	_select_from_card(view.card, true)
@@ -490,11 +602,11 @@ func _on_card_double(view: CardView) -> void:
 
 func _select_from_card(card: CardData, for_play: bool) -> void:
 	var rank: int = card.rank
-	if not game.rank_is_legal(0, rank):
+	if not game.rank_is_legal(_view_seat, rank):
 		_message("That rank cannot follow %d× %s." % [game.trick_count, RankSystem.short_label(game.trick_rank)])
 		return
 	var of_rank: Array = []
-	for c in game.hand_of(0):
+	for c in game.hand_of(_view_seat):
 		if (c as CardData).rank == rank:
 			of_rank.append(c)
 	if game.lead:
@@ -528,9 +640,13 @@ func _selected_origins() -> Array:
 
 func _seat_origins(seat: int, count: int) -> Array:
 	var out: Array = []
-	if seat <= 0 or seat - 1 >= _ai_plaques.size():
+	var plaque: Control = _plaque_for(seat)
+	if plaque == null:
+		if seat == _view_seat:
+			var gp0: Vector2 = _hand_row.global_position + Vector2(20, 0)
+			for i in range(count):
+				out.append(gp0 + Vector2(float(i) * 8.0, 0))
 		return out
-	var plaque: Control = _ai_plaques[seat - 1]
 	var gp: Vector2 = plaque.global_position + Vector2(plaque.size.x * 0.22, 14)
 	for i in range(count):
 		out.append(gp + Vector2(float(i) * 8.0, 0))
@@ -566,13 +682,14 @@ func _pop_pass(seat: int) -> void:
 	chip.add_theme_color_override("font_color", Color(0.88, 0.88, 0.92))
 	_fly_layer.add_child(chip)
 	var pos: Vector2
-	if seat == 0:
+	if seat == _view_seat:
 		pos = _hand_row.global_position + Vector2(_hand_row.size.x * 0.4, 20)
-	elif seat - 1 < _ai_plaques.size():
-		var p: Control = _ai_plaques[seat - 1]
-		pos = p.global_position + Vector2(8, 24)
 	else:
-		pos = Vector2(size.x * 0.4, 120)
+		var p: Control = _plaque_for(seat)
+		if p != null:
+			pos = p.global_position + Vector2(8, 24)
+		else:
+			pos = Vector2(size.x * 0.4, 120)
 	chip.global_position = pos
 	chip.scale = Vector2(0.4, 0.4)
 	var tw: Tween = create_tween()
@@ -588,7 +705,7 @@ func _award_rank_gold(seat: int, rank: int) -> void:
 	if n <= 0:
 		return
 	run.add_gold(seat, n)
-	var who: String = "You" if seat == 0 else RunManager.NAMES[seat]
+	var who: String = run.name_of(seat)
 	run.log_event("%s earns $%d on %s." % [who, n, RankSystem.short_label(rank)])
 
 func _fire_turn_action(seat: int, id: String) -> bool:
@@ -609,10 +726,10 @@ func _use_action(id: String) -> void:
 	if when == "results" or id == "just_say_no":
 		_message("%s is for the results desk, after the round." % str(info.get("name", id)))
 		return
-	if _busy or game.current_player != 0 or game.round_over:
+	if _busy or game.current_player != _view_seat or game.round_over:
 		_message("Actions are for your turn.")
 		return
-	_fire_turn_action(0, id)
+	_fire_turn_action(_view_seat, id)
 	_refresh()
 
 func _end_round() -> void:
@@ -669,18 +786,39 @@ func _on_buy_enhancement(item: Dictionary) -> void:
 	else:
 		_message("Not enough gold.")
 
-func _priced_offers(raw: Array) -> Array:
-	var out: Array = []
-	for it in raw:
-		out.append(run.priced_copy(it))
-	return out
-
 func _open_shop() -> void:
-	run.begin_shop_visit()
+	_shop_queue = run.living_humans()
+	_advance_desk()
+
+func _open_shop_for(seat: int) -> void:
+	_view_seat = seat
+	run.begin_shop_visit_for(seat)
 	_reopen_shop()
 
 func _reopen_shop() -> void:
-	_shop.present(run.gold, _priced_offers(run.shop_offers), run.owned_counts(), run.reroll_cost(), "Gold $%d  ·  HP %d/%d  ·  %d offers" % [run.gold, int(run.hp[0]), run.max_hp, run.shop_offers.size()])
+	var s: int = run.shop_seat
+	_shop.present(run.gold_of(s), _priced_offers_for(s), run.owned_counts_of(s), run.reroll_cost(), "%s  ·  Gold $%d  ·  HP %d/%d  ·  %d offers" % [run.name_of(s), run.gold_of(s), int(run.hp[s]), int(run.seat_max_hp[s]), run.shop_offers.size()])
+
+func _priced_offers_for(seat: int) -> Array:
+	var out: Array = []
+	for it in run.shop_offers:
+		out.append(run.priced_copy_of(seat, it))
+	return out
+
+func _advance_desk() -> void:
+	if _shop_queue.is_empty():
+		run.next_round()
+		_start_round()
+		return
+	var seat: int = int(_shop_queue.pop_front())
+	await _await_handoff(seat)
+	var acts: Array = run.result_action_ids_of(seat)
+	if not acts.is_empty() and _is_hotseat():
+		_desk_phase = "human_actions"
+		var title: String = "%s  ·  role cards" % run.name_of(seat)
+		_results.present_round(title, _results_rows(), _tribute_preview(), "\n".join(run.trade_log), acts)
+		return
+	_open_shop_for(seat)
 
 func _on_shop_reroll() -> void:
 	var cost: int = run.reroll_cost()
@@ -691,36 +829,44 @@ func _on_shop_reroll() -> void:
 		_message("Need $%d to reroll." % cost)
 
 func _on_shop_closed() -> void:
-	run.next_round()
-	_start_round()
+	_advance_desk()
 
 func _results_rows() -> Array:
 	return run.last_payout.duplicate()
 
 func _tribute_preview() -> String:
-	var lines: PackedStringArray = RoleTrade.preview_lines(run.living_finish(), RunManager.NAMES)
+	var lines: PackedStringArray = RoleTrade.preview_lines(run.living_finish(), run.seat_names)
 	return "Next tribute:\n" + "\n".join(lines)
 
 func _show_results() -> void:
+	_desk_phase = "table"
 	var title: String = "Round %d  ·  stake %d" % [run.round_n, run.stake()]
 	var log_text: String = "\n".join(run.trade_log) if not run.trade_log.is_empty() else ""
-	_results.present_round(title, _results_rows(), _tribute_preview(), log_text, run.result_action_ids())
+	var acts: Array = [] if _is_hotseat() else run.result_action_ids_of(_view_seat)
+	_results.present_round(title, _results_rows(), _tribute_preview(), log_text, acts)
 
 func _on_results_continued() -> void:
 	if run.run_over:
 		_show_run_over()
 		return
+	if _desk_phase == "human_actions":
+		_desk_phase = ""
+		_open_shop_for(_view_seat)
+		return
 	_open_shop()
 
 func _on_results_action(id: String) -> void:
-	if not run.has_action(id):
+	if not run.has_action_of(_view_seat, id):
 		return
-	if not run.spend_action(id):
+	if not run.spend_action_for(_view_seat, id):
 		return
-	var line: String = run.apply_results_action(0, id)
+	var line: String = run.apply_results_action(_view_seat, id)
 	if line != "":
 		run.log_event(line)
-	_show_results()
+	if _desk_phase == "human_actions":
+		_results.present_round("%s  ·  role cards" % run.name_of(_view_seat), _results_rows(), _tribute_preview(), "\n".join(run.trade_log), run.result_action_ids_of(_view_seat))
+	else:
+		_show_results()
 
 func _adjust_pair(pair: Dictionary) -> void:
 	var g: int = int(pair["giver"])
@@ -762,7 +908,7 @@ func _run_one_tribute(pair: Dictionary) -> void:
 	var receiver: int = int(pair["receiver"])
 	var n: int = int(pair["count"])
 	if run.cancelled_tribute_seats.has(giver):
-		var msg: String = "%s refuses the tribute (Just Say No / Pardon)." % RunManager.NAMES[giver]
+		var msg: String = "%s refuses the tribute (Just Say No / Pardon)." % run.name_of(giver)
 		_message(msg)
 		run.trade_log.append(msg)
 		return
@@ -771,26 +917,27 @@ func _run_one_tribute(pair: Dictionary) -> void:
 	var taken: Array = RoleTrade.take_highest(game.hand_of(giver), n)
 	RoleTrade.move_cards(game.hands, giver, receiver, taken)
 	var up: String = "%s (%s) tributes %s → %s" % [
-		RunManager.NAMES[giver], pair["giver_role"], RoleTrade.labels_of(taken), RunManager.NAMES[receiver]]
+		run.name_of(giver), pair["giver_role"], RoleTrade.labels_of(taken), run.name_of(receiver)]
 	_message(up)
 	run.trade_log.append(up)
 	_refresh()
 	await get_tree().create_timer(0.35).timeout
 	var ret_n: int = int(pair.get("return_count", n))
 	var picks: Array = []
-	if receiver == 0:
-		picks = await _await_player_picks(ret_n, "Give %d card(s) back to %s (%s)" % [ret_n, RunManager.NAMES[giver], pair["giver_role"]])
+	if _is_human(receiver):
+		await _await_handoff(receiver)
+		picks = await _await_player_picks(ret_n, "Give %d card(s) back to %s (%s)" % [ret_n, run.name_of(giver), pair["giver_role"]])
 	else:
 		picks = RoleTrade.ai_return_picks(game.hand_of(receiver), ret_n)
 	RoleTrade.move_cards(game.hands, receiver, giver, picks)
-	var down: String = "%s returns %s → %s" % [RunManager.NAMES[receiver], RoleTrade.labels_of(picks), RunManager.NAMES[giver]]
+	var down: String = "%s returns %s → %s" % [run.name_of(receiver), RoleTrade.labels_of(picks), run.name_of(giver)]
 	_message(down)
 	run.trade_log.append(down)
 	_refresh()
 	await get_tree().create_timer(0.25).timeout
 
 func _await_player_picks(count: int, prompt: String) -> Array:
-	_trade_need = mini(count, game.hand_of(0).size())
+	_trade_need = mini(count, game.hand_of(_view_seat).size())
 	_trade_picks.clear()
 	_trade_waiting = true
 	_trade_prompt.text = prompt
@@ -815,9 +962,14 @@ func _toggle_trade_pick(card: CardData) -> void:
 	_sync_hand()
 
 func _show_run_over() -> void:
-	var title: String = "THE OVAL IS YOURS" if run.run_won else "REMOVED FROM OFFICE"
-	var body: String = "You lasted %d round(s). Gold in pocket: %d.\n%s" % [
-		run.round_n, run.gold, "Last seat standing." if run.run_won else "HP hit zero. The cabinet outlasted you."]
+	var winner: String = ""
+	if run.run_won:
+		var live: Array = run.living_seats()
+		winner = run.name_of(int(live[0])) if not live.is_empty() else run.name_of(_view_seat)
+	var title: String = ("%s HOLDS THE OVAL" % winner) if run.run_won else "REMOVED FROM OFFICE"
+	var body: String = "%s lasted %d round(s). Gold in pocket: %d.\n%s" % [
+		run.name_of(_view_seat), run.round_n, run.gold_of(_view_seat),
+		"Last seat standing." if run.run_won else "The humans are out. The cabinet remains."]
 	_results.present_game_over(title, _results_rows(), body)
 
 func _show_overlay(title_text: String, body: String, actions: Array) -> void:
@@ -843,16 +995,17 @@ func _message(t: String) -> void:
 	_msg.text = t
 
 func _refresh_hud() -> void:
-	if _hud == null:
+	if _hud == null or run == null or run.hp.is_empty():
 		return
-	var role: String = RoleTrade.role_of(run.living_finish(), 0)
+	var role: String = RoleTrade.role_of(run.living_finish(), _view_seat)
 	var role_bit: String = "  %s" % role if not run.living_finish().is_empty() else ""
-	var bind: String = run.rank_mod_short(0)
-	_hud.text = "Round %d  Stake %d  HP %d/%d  Gold %d  Living %d%s%s" % [
-		run.round_n, run.stake(), int(run.hp[0]), run.max_hp, run.gold, run.living_seats().size(), role_bit, bind]
+	var bind: String = run.rank_mod_short(_view_seat)
+	var s: int = _view_seat
+	_hud.text = "%s  Round %d  Stake %d  HP %d/%d  Gold %d  Living %d%s%s" % [
+		run.name_of(s), run.round_n, run.stake(), int(run.hp[s]), int(run.seat_max_hp[s]), run.gold_of(s), run.living_seats().size(), role_bit, bind]
 
 func _set_buttons() -> void:
-	var yours: bool = game.current_player == 0 and not game.round_over and not _busy and not _trade_waiting
+	var yours: bool = game.current_player == _view_seat and _is_human(_view_seat) and not game.round_over and not _busy and not _trade_waiting
 	_play_btn.disabled = not yours
 	_pass_btn.disabled = not yours or game.lead
 
@@ -860,7 +1013,7 @@ func _refresh() -> void:
 	_refresh_hud()
 	_update_banner()
 	var vw: float = size.x if size.x > 10.0 else 390.0
-	var nhand: int = maxi(1, game.hand_of(0).size())
+	var nhand: int = maxi(1, game.hand_of(_view_seat).size())
 	var w: float = clampf(floorf((vw - 20.0) / float(mini(nhand, 10))), 36.0, 70.0)
 	_card_size = Vector2(w, w * 1.4)
 	_sync_ais()
@@ -872,17 +1025,25 @@ func _refresh() -> void:
 
 func _sync_ais() -> void:
 	var mini: Vector2 = Vector2(maxf(22.0, _card_size.x * 0.38), maxf(30.0, _card_size.y * 0.38))
+	var others: Array = _other_seats()
 	for i in range(_ai_plaques.size()):
-		var seat: int = i + 1
 		var wrap: PanelContainer = _ai_plaques[i]
+		if i >= others.size():
+			wrap.visible = false
+			continue
+		wrap.visible = true
+		var seat: int = int(others[i])
+		wrap.set_meta("seat", seat)
 		var box: Node = wrap.get_node("Box")
 		var fan: Control = box.get_node("Fan")
 		var bust: SeatBust = box.get_node("Bust")
+		var nm: Label = box.get_node("Name")
 		var badge: Label = box.get_node("Badge")
 		var hp: Label = box.get_node("Hp")
 		var last: Label = box.get_node("Last")
 		var peek: Label = box.get_node("Peek")
 		var whip: Button = box.get_node("Whip")
+		nm.text = run.name_of(seat).replace("The ", "")
 		var psb: StyleBoxFlat = StyleBoxFlat.new()
 		psb.bg_color = Color(0.06, 0.10, 0.16, 0.88)
 		psb.set_corner_radius_all(10)
@@ -893,7 +1054,10 @@ func _sync_ais() -> void:
 		else:
 			psb.border_color = Color(0.85, 0.70, 0.28, 0.35)
 		wrap.add_theme_stylebox_override("panel", psb)
-		bust.bust_color = AI_COLORS[seat - 1] if run.is_alive(seat) else Color(0.22, 0.22, 0.24)
+		var col_i: int = seat - 1 if seat > 0 else 0
+		bust.bust_color = AI_COLORS[col_i % AI_COLORS.size()] if run.is_alive(seat) else Color(0.22, 0.22, 0.24)
+		if _is_human(seat):
+			bust.bust_color = bust.bust_color.lightened(0.25)
 		bust.queue_redraw()
 		var nshow: int = 0
 		if run.is_alive(seat):
@@ -921,8 +1085,9 @@ func _sync_ais() -> void:
 			badge.add_theme_font_size_override("font_size", 12)
 			hp.text = ""
 		var role: String = RoleTrade.short_role(RoleTrade.role_of(run.living_finish(), seat))
-		last.text = "%s  %s%s" % [role, str(game.last_play_label.get(seat, "—")), run.rank_mod_short(seat)]
-		if game.peek_seat == seat:
+		var kind: String = "P" if _is_human(seat) else "AI"
+		last.text = "%s %s  %s%s" % [kind, role, str(game.last_play_label.get(seat, "—")), run.rank_mod_short(seat)]
+		if game.peek_seat == seat and not _is_human(seat):
 			var bits: Array[String] = []
 			for c2 in game.hand_of(seat):
 				bits.append((c2 as CardData).label())
@@ -930,20 +1095,21 @@ func _sync_ais() -> void:
 			peek.visible = true
 		else:
 			peek.visible = false
-		whip.visible = run.has_upgrade("whip") and run.is_alive(seat) and (not run.whip_used or run.has_upgrade("majority"))
+		whip.set_meta("seat", seat)
+		whip.visible = run.has_upgrade_of(_view_seat, "whip") and run.is_alive(seat) and (not run.whip_used or run.has_upgrade_of(_view_seat, "majority"))
 
 func _sync_odds() -> void:
 	if _odds == null:
 		return
-	_odds.text = OddsHelper.hud_text(game, run, 0)
+	_odds.text = OddsHelper.hud_text(game, run, _view_seat)
 
 func _whip(seat: int) -> void:
-	if run.whip_used and not run.has_upgrade("majority"):
+	if run.whip_used and not run.has_upgrade_of(_view_seat, "majority"):
 		return
-	if not run.has_upgrade("majority"):
+	if not run.has_upgrade_of(_view_seat, "majority"):
 		run.whip_used = true
 	var legal: Array = game.legal_combos(seat)
-	_message("Whip Count: %s %s follow." % [RunManager.NAMES[seat], "CAN" if not legal.is_empty() else "cannot"])
+	_message("Whip Count: %s %s follow." % [run.name_of(seat), "CAN" if not legal.is_empty() else "cannot"])
 	_refresh()
 
 func _sync_trick() -> void:
@@ -976,7 +1142,8 @@ func _sync_trick() -> void:
 		v.rotation = 0.05 * float(i - 1)
 
 func _sync_hand() -> void:
-	var hand: Array = game.hand_of(0)
+	var conceal: bool = _is_hotseat() and game.current_player != _view_seat and not _trade_waiting
+	var hand: Array = [] if conceal else game.hand_of(_view_seat)
 	var n: int = hand.size()
 	while _hand_views.size() > n:
 		var extra: CardView = _hand_views.pop_back()
@@ -994,7 +1161,7 @@ func _sync_hand() -> void:
 	if row_w < 20.0:
 		row_w = maxf(0.0, size.x - 20.0)
 	var start: float = maxf(0.0, (row_w - total) * 0.5)
-	var yours: bool = game.current_player == 0 and not _busy and not game.round_over
+	var yours: bool = game.current_player == _view_seat and _is_human(_view_seat) and not _busy and not game.round_over
 	var picking: bool = _trade_waiting
 	for i in range(n):
 		var card: CardData = hand[i]
@@ -1003,7 +1170,7 @@ func _sync_hand() -> void:
 			cv2.set_card(card)
 		cv2.set_display_size(_card_size)
 		cv2.selected = _trade_picks.has(card) if picking else _selected.has(card)
-		var legal: bool = yours and game.rank_is_legal(0, card.rank)
+		var legal: bool = yours and game.rank_is_legal(_view_seat, card.rank)
 		cv2.highlighted = picking or (legal and not cv2.selected)
 		cv2.dimmed = yours and not legal and not picking
 		var dest: Vector2 = Vector2(start + float(i) * (_card_size.x + gap), -16.0 if cv2.selected else (-5.0 if cv2.highlighted else 0.0))
@@ -1020,9 +1187,10 @@ func _rebuild_actions() -> void:
 	for c in _action_row.get_children():
 		_action_row.remove_child(c)
 		c.queue_free()
-	if run.actions.is_empty():
+	var inv: Array = run.actions_of(_view_seat)
+	if inv.is_empty() or (_is_hotseat() and game.current_player != _view_seat):
 		return
-	for id in run.actions:
+	for id in inv:
 		var info: Dictionary = ActionDB.get_by_id(str(id))
 		var b: Button = Button.new()
 		var when: String = str(info.get("when", "turn"))
