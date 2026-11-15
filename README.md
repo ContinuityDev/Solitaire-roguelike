@@ -20,9 +20,10 @@ There is **no win screen**. The run continues until every human hits 0 HP. Dead 
 
 ## How a round works
 
-- **54-card deck** (52 + **2 jokers**), six seats. Rank order: **3 lowest … King, Ace, then 2s (bombs)**, then uncapped **super ranks** (16, 17, …) once inflation / Incumbent climb past bombs.
-- Each round applies **rank inflation** (`bonus = (r−1) + ⌊(r−1)² / 8⌋` where `r` is the round). Faces show compact labels at huge values (`1.2K`, `3.4M`, scientific past trillions).
+- **54-card deck** (52 + **2 jokers**), six seats. Rank order: **3 lowest … King, Ace, then 2s (bombs)**, then uncapped **super ranks** (16, 17, …) from Incumbent / promotes / binds — **not** from automatic per-round inflation.
+- Difficulty scales via **ante / stake**, AI HP on revive, and **AI shop buys** between rounds. Card faces only change through upgrades, rank binds, Incumbent, etc. Blue true-value badges still show when a printed face differs from follow power.
 - Play **N of a kind** (single, pair, trips, four). Follow with the same count, equal or **higher effective rank**. A blue value is the trick’s true rank: if someone plays a 5 that reads as a blue 6, the trick is a 6 — a printed 5 cannot follow. Pass if you cannot or will not.
+- **AI shop:** cabinet AIs start round 1 with **no upgrades**. After each round they spend gold at their own desk (up to two gold buys) so they scale with you. Their loadout badges show on each seat plaque.
 - **Joker (pile clear):** a single joker is always legal on your turn (lead or follow, any count). Playing it acts exactly like everyone else having passed: the **pile clears**, that seat **leads** the next pile, hands stay as they are, and the **round continues**. It does **not** dump the rest of the hand or end the round/deal. If the joker was your last card, you still finish as usual. Jokers have a purple **Jk / JOKER** face (red or black star).
 - **Pass lockout:** once you pass on a pile, you are locked out until that pile ends (Play disabled; seat shows **PASSED**). When every other active seat has passed, the pile ends and the last player who played **leads** the next pile. AI seats respect the same lockout.
 - **Host leads round 1** (seat 0). Later rounds, last round’s 1st place leads if they are still living; otherwise the host does.

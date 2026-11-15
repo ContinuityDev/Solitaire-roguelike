@@ -3,7 +3,7 @@ extends Control
 ## President. Title → Solo vs AIs, hotseat lobby, or a joinable table (host = P1).
 
 ## Bump when shipping a web export to docs/ so Pages playtesters can confirm the build.
-const BUILD_ID: String = "14"
+const BUILD_ID: String = "15"
 
 signal trade_confirmed
 
@@ -519,7 +519,16 @@ func _make_ai_plaque(seat: int) -> PanelContainer:
 	last.name = "Last"
 	last.add_theme_font_size_override("font_size", 10)
 	last.clip_text = true
+	last.mouse_filter = Control.MOUSE_FILTER_STOP
 	box.add_child(last)
+	var gear: Label = Label.new()
+	gear.name = "Gear"
+	gear.add_theme_font_size_override("font_size", 9)
+	gear.add_theme_color_override("font_color", Color(0.75, 0.82, 0.95))
+	gear.clip_text = true
+	gear.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	gear.mouse_filter = Control.MOUSE_FILTER_STOP
+	box.add_child(gear)
 	var peek: Label = Label.new()
 	peek.name = "Peek"
 	peek.add_theme_font_size_override("font_size", 9)
@@ -566,10 +575,10 @@ func _start_round() -> void:
 	game.setup(live, run.rng, 0, 0, 0, run.lead_seat())
 	var deal_logs: Array = run.apply_deal_effects(game)
 	if _is_human(game.current_player):
-		_message("Round %d · Ante %d · Stake %d · Rank+%s. %s leads — yellow cards can be played." % [
-			run.round_n, run.ante(), run.stake(), NumFormat.compact(run.rank_bonus()), run.name_of(game.current_player)])
+		_message("Round %d · Ante %d · Stake %d. %s leads — yellow cards can be played." % [
+			run.round_n, run.ante(), run.stake(), run.name_of(game.current_player)])
 	else:
-		_message("Round %d · Ante %d. %s leads." % [run.round_n, run.ante(), run.name_of(game.current_player)])
+		_message("Round %d · Ante %d · Stake %d. %s leads." % [run.round_n, run.ante(), run.stake(), run.name_of(game.current_player)])
 	if not deal_logs.is_empty():
 		for line in deal_logs:
 			run.log_event(str(line))
@@ -1226,8 +1235,8 @@ func _tribute_preview() -> String:
 
 func _show_results() -> void:
 	_desk_phase = "table"
-	var title: String = "Round %d  ·  ante %d  ·  stake %d  ·  rank+%s" % [
-		run.round_n, run.ante(), run.stake(), NumFormat.compact(run.rank_bonus())]
+	var title: String = "Round %d  ·  ante %d  ·  stake %d" % [
+		run.round_n, run.ante(), run.stake()]
 	var log_text: String = "\n".join(run.trade_log) if not run.trade_log.is_empty() else ""
 	var acts: Array = [] if _is_hotseat() else run.result_action_ids_of(_view_seat)
 	_results.present_round(title, _results_rows(), _tribute_preview(), log_text, acts, true)
@@ -1396,8 +1405,8 @@ func _refresh_hud() -> void:
 	var role_bit: String = "  %s" % role if not run.living_finish().is_empty() else ""
 	var bind: String = run.rank_mod_short(_view_seat)
 	var s: int = _view_seat
-	_hud.text = "%s  R%d  Ante %d  Stake %d  Rank+%s  HP %d/%d  $%d  ◈%d  Live %d%s%s" % [
-		run.name_of(s), run.round_n, run.ante(), run.stake(), NumFormat.compact(run.rank_bonus()),
+	_hud.text = "%s  R%d  Ante %d  Stake %d  HP %d/%d  $%d  ◈%d  Live %d%s%s" % [
+		run.name_of(s), run.round_n, run.ante(), run.stake(),
 		int(run.hp[s]), int(run.seat_max_hp[s]), run.gold_of(s), run.chips_of(s), run.living_seats().size(), role_bit, bind]
 
 func _set_buttons() -> void:
@@ -1439,6 +1448,7 @@ func _sync_ais() -> void:
 		var badge: Label = box.get_node("Badge")
 		var hp: Label = box.get_node("Hp")
 		var last: Label = box.get_node("Last")
+		var gear: Label = box.get_node_or_null("Gear")
 		var peek: Label = box.get_node("Peek")
 		var whip: Button = box.get_node("Whip")
 		nm.text = run.name_of(seat).replace("The ", "")
@@ -1494,7 +1504,18 @@ func _sync_ais() -> void:
 			last.add_theme_color_override("font_color", Color(0.70, 0.72, 0.78))
 		else:
 			last.add_theme_color_override("font_color", Color(0.85, 0.88, 0.92))
-		last.text = "%s %s  %s%s" % [kind, role, last_bit, run.rank_mod_short(seat)]
+		var loadout: String = run.loadout_short(seat)
+		last.text = "%s %s  %s" % [kind, role, last_bit]
+		if gear != null:
+			if loadout != "":
+				gear.text = loadout.strip_edges().trim_prefix("[").trim_suffix("]")
+				gear.tooltip_text = "%s loadout:%s" % [run.name_of(seat), loadout]
+				gear.visible = true
+			else:
+				gear.text = "—"
+				gear.tooltip_text = "%s — no upgrades yet" % run.name_of(seat)
+				gear.visible = true
+		last.tooltip_text = gear.tooltip_text if gear != null else ""
 		if game.peek_seat == seat and not _is_human(seat):
 			var bits: Array[String] = []
 			for c2 in game.hand_of(seat):
