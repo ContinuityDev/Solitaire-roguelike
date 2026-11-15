@@ -34,13 +34,16 @@ Stake starts at 5 and climbs each round (`4 + round`). **Worse finish = more gol
 
 ## The desk (shop)
 
-After every round, spend gold:
+After every round, spend gold. The Desk shows **4 random offers** (a mix of upgrades, actions, and enhancements) — not the whole catalog. **Reroll** redraws the stock for `$2 + $2 × rerolls this visit` (Lobbyist still discounts). Maxed copies do not restock.
 
 **Upgrades (keep):** Packed Briefcase, Favorite rank (2s / Aces / Kings), Deep Pockets, Incumbent, Whip Count, Lobbyist (cheaper desk), Populist Wave (heal if you were Asshole), Oval Office (+1 incoming tribute as President), Majority Whip, Safe Seat (HP floor 5).
 
 **Enhancements:** Steel Card (immune to tribute), Gilded Seal (+gold on a top finish), Union Deal (smaller tributes), Wax Seal (return 1 fewer), Lucky Draw.
 
 **Action cards (one-shot):** Veto, Filibuster, Executive Order, Leak, Tax, Rally, plus role cards — **Uprising** (swap President ↔ Asshole), **Just Say No** (cancel a tribute or a hostile action on you), Impeach, Pardon, Coup, Recess.
+
+### Role streak
+Finishing in the **same role** consecutive rounds pays bonus gold: streak 1 is base only; streak 2 is **+6**; streak 3 is **+12**; in general **`6 × (streak − 1)`**. It resets when your role changes. Every seat is tracked; results show e.g. `President ×3 · streak bonus +12`.
 
 ## AIs
 

@@ -10,6 +10,7 @@ const SEATS: int = 6
 const START_HP: int = 50
 const NAMES: Array = ["You", "The Speaker", "The Whip", "The Veep", "The Justice", "The General"]
 const GOLD_BY_PLACE: Array = [0, 4, 6, 8, 12, 16, 22] # index = place 1..6
+const STREAK_UNIT: int = 6 # bonus gold = STREAK_UNIT * (streak - 1)
 
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var round_n: int = 1
@@ -28,6 +29,10 @@ var cancelled_tribute_seats: Array = [] # givers who JSN/pardon
 var skip_tributes: bool = false
 var trade_log: Array = []
 var last_role: String = "" # your role last round, for Populist
+var role_streak_role: Array = [] # last finish role per seat
+var role_streak_len: Array = [] # consecutive count per seat
+var shop_offers: Array = []
+var shop_rerolls: int = 0
 var run_over: bool = false
 var run_won: bool = false
 
@@ -53,6 +58,13 @@ func start_new_run() -> void:
 	skip_tributes = false
 	trade_log.clear()
 	last_role = ""
+	role_streak_role.clear()
+	role_streak_len.clear()
+	for _s in range(SEATS):
+		role_streak_role.append("")
+		role_streak_len.append(0)
+	shop_offers.clear()
+	shop_rerolls = 0
 	run_over = false
 	run_won = false
 	changed.emit()
@@ -183,15 +195,23 @@ func apply_payouts(finish_order: Array) -> void:
 				hp_delta = s if place == 1 else int(ceil(float(s) / 2.0))
 			else:
 				hp_delta = -s if place == n else -int(ceil(float(s) / 2.0))
+		var role: String = str(roles.get(seat, {}).get("role", RoleTrade.ROLE_NEUTRAL))
+		var streak: int = _tick_role_streak(seat, role)
+		var streak_bonus: int = streak_bonus_gold(streak)
 		if seat == 0:
 			if has_enhancement("gilded") and place <= 2:
 				gold_gain += 2 * count_enhancement("gilded")
+			gold_gain += streak_bonus
 			gold += gold_gain
 		hp[seat] = clampi(int(hp[seat]) + hp_delta, 0, max_hp if seat == 0 else START_HP)
 		if seat == 0 and has_upgrade("safe_seat") and int(hp[0]) > 0:
 			hp[0] = maxi(int(hp[0]), 5)
-		var role: String = str(roles.get(seat, {}).get("role", RoleTrade.ROLE_NEUTRAL))
-		last_payout.append({"seat": seat, "place": place, "gold": gold_gain if seat == 0 else 0, "hp_delta": hp_delta, "name": NAMES[seat], "role": role})
+		last_payout.append({
+			"seat": seat, "place": place,
+			"gold": gold_gain if seat == 0 else 0,
+			"hp_delta": hp_delta, "name": NAMES[seat], "role": role,
+			"streak": streak, "streak_bonus": streak_bonus,
+		})
 	# Human Deep Pockets only raises human max; AIs stay 50.
 	_check_end()
 	changed.emit()
@@ -273,3 +293,45 @@ func apply_populist() -> void:
 	if has_upgrade("populist") and last_role == RoleTrade.ROLE_SCUM and int(hp[0]) > 0:
 		hp[0] = mini(int(hp[0]) + 8 * count_upgrade("populist"), max_hp)
 		changed.emit()
+
+## streak 1 (first time in this role) = 0; streak 2 = +N; streak 3 = +2N; …
+static func streak_bonus_gold(streak: int) -> int:
+	if streak <= 1:
+		return 0
+	return STREAK_UNIT * (streak - 1)
+
+func _tick_role_streak(seat: int, role: String) -> int:
+	while role_streak_role.size() < SEATS:
+		role_streak_role.append("")
+		role_streak_len.append(0)
+	if str(role_streak_role[seat]) == role:
+		role_streak_len[seat] = int(role_streak_len[seat]) + 1
+	else:
+		role_streak_role[seat] = role
+		role_streak_len[seat] = 1
+	return int(role_streak_len[seat])
+
+func begin_shop_visit() -> void:
+	shop_rerolls = 0
+	shop_offers = ShopStock.draw_offers(rng, self, ShopStock.SLOTS)
+	changed.emit()
+
+func reroll_cost() -> int:
+	return shop_price(ShopStock.reroll_cost_at(shop_rerolls))
+
+func reroll_shop() -> bool:
+	var c: int = reroll_cost()
+	if gold < c:
+		return false
+	gold -= c
+	shop_rerolls += 1
+	shop_offers = ShopStock.draw_offers(rng, self, ShopStock.SLOTS)
+	changed.emit()
+	return true
+
+func take_shop_offer(id: String) -> void:
+	var remain: Array = []
+	for it in shop_offers:
+		if str(it.get("id", "")) != id:
+			remain.append(it)
+	shop_offers = remain
