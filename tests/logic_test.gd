@@ -185,6 +185,34 @@ func _init() -> void:
 	_check(sealed > 0, "sealed column is not the leftmost")
 	var opened: Array = board4.register_wall_event("pattern")
 	_check(opened.size() == 1 and not board4.is_walled(sealed), "pattern cracks the Brick Wall")
+	# Curtain wall: pattern opens it and can flip the top card
+	var boardC: SolitaireBoard = SolitaireBoard.new()
+	boardC.setup(5, wrng, 0, 1, {}, [{"kind": "curtain", "name": "Curtain Wall"}])
+	var ccol: int = -1
+	for k in boardC.walls.keys():
+		ccol = int(k)
+	if ccol >= 0 and not (boardC.tableau[ccol] as Array).is_empty():
+		(boardC.tableau[ccol][boardC.tableau[ccol].size() - 1] as CardData).face_up = false
+	var cop: Array = boardC.register_wall_event("pattern")
+	_check(cop.size() == 1, "curtain opens on a Pattern")
+	_check(not boardC.is_walled(ccol), "curtain column is unsealed")
+	# Suit Surge: three same-suit finale plays
+	var surge: Array = []
+	run4.foundation_history.clear()
+	run4.register_foundation_play(CardData.new(3, 0), board3)
+	run4.register_foundation_play(CardData.new(4, 0), board3)
+	surge = run4.register_foundation_play(CardData.new(5, 0), board3)
+	_check(surge.has("suit_surge"), "three same-suit finale plays is Suit Surge (got %s)" % str(surge))
+	# Cracked wall takes 3 foundation events
+	var boardCr: SolitaireBoard = SolitaireBoard.new()
+	boardCr.setup(5, wrng, 0, 1, {}, [{"kind": "cracked", "name": "Cracked Wall"}])
+	var cr: int = int(boardCr.walls.keys()[0])
+	boardCr.register_wall_event("foundation", CardData.new(2, 0))
+	boardCr.register_wall_event("foundation", CardData.new(3, 0))
+	_check(boardCr.is_walled(cr), "cracked wall still sealed after 2 finales")
+	var crop: Array = boardCr.register_wall_event("foundation", CardData.new(4, 0))
+	_check(crop.size() == 1 and not boardCr.is_walled(cr), "third finale play opens a Cracked Wall")
+
 
 	# --- find_best_move prefers foundation ---
 	var board5: SolitaireBoard = SolitaireBoard.new()

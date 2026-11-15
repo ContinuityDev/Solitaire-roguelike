@@ -255,7 +255,7 @@ func try_move(source: Dictionary, dest: Dictionary) -> Dictionary:
 		_take_source(source, 1)
 		foundation_pile(card.suit).append(card)
 		var flipped: bool = _flip_exposed(source)
-		return {"ok": true, "flipped": flipped, "to_foundation": true, "card": card, "count": 1}
+		return {"ok": true, "flipped": flipped, "to_foundation": true, "card": card, "count": 1, "dest_type": "foundation", "dest_index": card.suit}
 	elif dest_type == "tableau":
 		var di: int = int(dest.get("index", -1))
 		if di < 0 or di >= tableau.size() or is_walled(di):
@@ -270,7 +270,7 @@ func try_move(source: Dictionary, dest: Dictionary) -> Dictionary:
 		for c in moving:
 			pile.append(c)
 		var flipped2: bool = _flip_exposed(source)
-		return {"ok": true, "flipped": flipped2, "to_foundation": false, "card": bottom, "count": moving.size()}
+		return {"ok": true, "flipped": flipped2, "to_foundation": false, "card": bottom, "count": moving.size(), "dest_type": "tableau", "dest_index": di}
 	return fail
 
 func _peek_source(source: Dictionary) -> Array:
