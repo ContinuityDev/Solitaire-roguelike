@@ -50,3 +50,22 @@ static func _choose_follow(legal: Array, personality: int, game: PresidentGame) 
 		return {"pass": true}
 	# Balanced: 40% bomb, else pass.
 	return {"pass": true}
+
+## After a round, if this seat holds a results-time action, pick one.
+static func choose_role_action(finish: Array, seat: int, inventory: Array) -> String:
+	if inventory.is_empty() or finish.size() < 3:
+		return ""
+	var role: String = RoleTrade.role_of(finish, seat)
+	if inventory.has("uprising") and (role == RoleTrade.ROLE_SCUM or role == RoleTrade.ROLE_VA):
+		return "uprising"
+	if inventory.has("coup") and role != RoleTrade.ROLE_PRES:
+		return "coup"
+	if inventory.has("pardon") and (role == RoleTrade.ROLE_SCUM or role == RoleTrade.ROLE_VA):
+		return "pardon"
+	if inventory.has("just_say_no") and (role == RoleTrade.ROLE_SCUM or role == RoleTrade.ROLE_VA):
+		return "just_say_no"
+	if inventory.has("recess") and role == RoleTrade.ROLE_SCUM:
+		return "recess"
+	if inventory.has("impeach") and role == RoleTrade.ROLE_VP:
+		return "impeach"
+	return ""
