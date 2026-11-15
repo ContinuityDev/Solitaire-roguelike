@@ -31,9 +31,6 @@ var _selected: Array = []
 var _card_size: Vector2 = Vector2(58, 82)
 var _ai_timer: Timer
 var _busy: bool = false
-var _shop_upgrades: Array = []
-var _shop_actions: Array = []
-var _shop_enhancements: Array = []
 var _ai_plaques: Array = []
 var _hand_views: Array = []
 var _trick_views: Array = []
@@ -154,6 +151,7 @@ func _build_ui() -> void:
 	_shop.bought_upgrade.connect(_on_buy_upgrade)
 	_shop.bought_action.connect(_on_buy_action)
 	_shop.bought_enhancement.connect(_on_buy_enhancement)
+	_shop.reroll_pressed.connect(_on_shop_reroll)
 	_shop.closed.connect(_on_shop_closed)
 	var resh: CenterContainer = CenterContainer.new()
 	resh.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -687,6 +685,7 @@ func _float_payouts() -> void:
 
 func _on_buy_upgrade(item: Dictionary) -> void:
 	if run.buy_upgrade(str(item["id"]), int(item["price"])):
+		run.take_shop_offer(str(item["id"]))
 		_message("Bought %s." % str(item["name"]))
 		_reopen_shop()
 	else:
@@ -694,6 +693,7 @@ func _on_buy_upgrade(item: Dictionary) -> void:
 
 func _on_buy_action(item: Dictionary) -> void:
 	if run.buy_action(str(item["id"]), int(item["price"])):
+		run.take_shop_offer(str(item["id"]))
 		_message("Pocketed %s." % str(item["name"]))
 		_reopen_shop()
 	else:
@@ -701,6 +701,7 @@ func _on_buy_action(item: Dictionary) -> void:
 
 func _on_buy_enhancement(item: Dictionary) -> void:
 	if run.buy_enhancement(str(item["id"]), int(item["price"])):
+		run.take_shop_offer(str(item["id"]))
 		_message("Stamped %s." % str(item["name"]))
 		_reopen_shop()
 	else:
@@ -713,13 +714,19 @@ func _priced_offers(raw: Array) -> Array:
 	return out
 
 func _open_shop() -> void:
-	_shop_upgrades = UpgradeDB.shop_offers(run.rng, 3)
-	_shop_actions = ActionDB.shop_offers(run.rng, 3)
-	_shop_enhancements = EnhancementDB.shop_offers(run.rng, 3)
+	run.begin_shop_visit()
 	_reopen_shop()
 
 func _reopen_shop() -> void:
-	_shop.present(run.gold, _priced_offers(_shop_upgrades), _priced_offers(_shop_actions), _priced_offers(_shop_enhancements), run.owned_counts(), "Gold $%d  ·  HP %d/%d" % [run.gold, int(run.hp[0]), run.max_hp])
+	_shop.present(run.gold, _priced_offers(run.shop_offers), run.owned_counts(), run.reroll_cost(), "Gold $%d  ·  HP %d/%d  ·  %d offers" % [run.gold, int(run.hp[0]), run.max_hp, run.shop_offers.size()])
+
+func _on_shop_reroll() -> void:
+	var cost: int = run.reroll_cost()
+	if run.reroll_shop():
+		_message("Rerolled the desk for $%d." % cost)
+		_reopen_shop()
+	else:
+		_message("Need $%d to reroll." % cost)
 
 func _on_shop_closed() -> void:
 	run.next_round()

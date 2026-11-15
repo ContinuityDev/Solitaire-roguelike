@@ -121,8 +121,38 @@ func _init() -> void:
 	_check(ActionDB.ACTIONS.size() >= 10, "action pool expanded")
 	_check(EnhancementDB.ENHANCEMENTS.size() >= 4, "enhancement pool")
 	_check(int(UpgradeDB.get_by_id("packed")["price"]) > 0, "packed has a price")
-	var offers: Array = UpgradeDB.shop_offers(rng, 3)
-	_check(offers.size() == 3, "shop offers 3 upgrades")
+	var stock_run: RunManager = RunManager.new()
+	stock_run.start_new_run()
+	stock_run.rng.seed = 11
+	stock_run.begin_shop_visit()
+	_check(stock_run.shop_offers.size() == ShopStock.SLOTS, "desk offers %d slots" % ShopStock.SLOTS)
+	_check(stock_run.shop_offers.size() < ShopStock.catalog_size(), "offer count is less than the full catalog (%d < %d)" % [stock_run.shop_offers.size(), ShopStock.catalog_size()])
+	stock_run.gold = 50
+	var ids_a: Array = []
+	for o in stock_run.shop_offers:
+		ids_a.append(str(o["id"]))
+	var cost1: int = stock_run.reroll_cost()
+	_check(cost1 == ShopStock.reroll_cost_at(0), "first reroll costs 2 + 2×0")
+	var gold_before: int = stock_run.gold
+	_check(stock_run.reroll_shop(), "reroll spends gold")
+	_check(stock_run.gold == gold_before - cost1, "reroll charged $%d" % cost1)
+	_check(stock_run.reroll_cost() == ShopStock.reroll_cost_at(1), "second reroll costs 2 + 2×1")
+	var ids_b: Array = []
+	for o2 in stock_run.shop_offers:
+		ids_b.append(str(o2["id"]))
+	_check(" ".join(ids_a) != " ".join(ids_b), "reroll redraws offers (%s -> %s)" % [" ".join(ids_a), " ".join(ids_b)])
+	stock_run.owned_upgrades.append("whip")
+	stock_run.owned_upgrades.append("majority")
+	stock_run.owned_upgrades.append("oval")
+	stock_run.owned_upgrades.append("safe_seat")
+	stock_run.owned_upgrades.append("populist")
+	var avail: Array = ShopStock.available(stock_run)
+	var saw_whip: bool = false
+	for a0 in avail:
+		if str(a0["id"]) == "whip":
+			saw_whip = true
+	_check(not saw_whip, "maxed unique upgrades do not restock")
+	stock_run.free()
 	_check(ActionDB.get_by_id("uprising").size() > 0, "uprising is in the catalog")
 	_check(ActionDB.get_by_id("just_say_no").size() > 0, "just say no is in the catalog")
 	_check(int(EnhancementDB.get_by_id("steel").get("price", 0)) > 0, "steel has a price")
@@ -214,6 +244,27 @@ func _init() -> void:
 	var ai_inv: Array = ["uprising"]
 	_check(PresidentAI.choose_role_action([1, 2, 3, 4, 5, 0], 0, ai_inv) == "uprising", "AI Asshole wants Uprising")
 	_check(PresidentAI.choose_role_action([0, 1, 2, 3, 4, 5], 0, ai_inv) == "", "AI President skips Uprising")
+
+	_check(RunManager.streak_bonus_gold(1) == 0, "streak 1 is base gold only")
+	_check(RunManager.streak_bonus_gold(2) == RunManager.STREAK_UNIT, "streak 2 is +N")
+	_check(RunManager.streak_bonus_gold(3) == 2 * RunManager.STREAK_UNIT, "streak 3 is +2N")
+	var streak_run: RunManager = RunManager.new()
+	streak_run.start_new_run()
+	streak_run.apply_payouts([0, 1, 2, 3, 4, 5])
+	_check(int(streak_run.last_payout[0]["streak"]) == 1, "first President finish is streak 1")
+	_check(int(streak_run.last_payout[0]["streak_bonus"]) == 0, "streak 1 pays no bonus")
+	var gold_s1: int = streak_run.gold
+	streak_run.apply_payouts([0, 1, 2, 3, 4, 5])
+	_check(int(streak_run.last_payout[0]["streak"]) == 2, "second consecutive President is streak 2")
+	_check(int(streak_run.last_payout[0]["streak_bonus"]) == RunManager.STREAK_UNIT, "streak 2 bonus is N")
+	_check(streak_run.gold == gold_s1 + 4 + RunManager.STREAK_UNIT, "human gold includes streak bonus")
+	streak_run.apply_payouts([0, 1, 2, 3, 4, 5])
+	_check(int(streak_run.last_payout[0]["streak"]) == 3 and int(streak_run.last_payout[0]["streak_bonus"]) == 2 * RunManager.STREAK_UNIT, "streak 3 bonus is 2N")
+	_check(int(streak_run.last_payout[1]["streak"]) == 3, "AI VP streak also climbs")
+	streak_run.apply_payouts([1, 2, 3, 4, 5, 0])
+	_check(int(streak_run.last_payout[5]["streak"]) == 1, "role change resets human streak")
+	_check(int(streak_run.last_payout[5]["streak_bonus"]) == 0, "reset streak pays no bonus")
+	streak_run.free()
 
 	rng.seed = 77
 	var d1: Dictionary = Deck.deal_president([0, 1, 2, 3, 4, 5], rng, 0, 2, 0)
