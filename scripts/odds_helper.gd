@@ -156,7 +156,7 @@ static func hud_text(game: PresidentGame, run: RunManager, viewer: int = 0) -> S
 			# more than we can know; show chance they still hold a 2, and the
 			# trick rank.
 			p_follow = p_seat_holds_rank(game, next_s, 2, viewer)
-		var nm: String = RunManager.NAMES[next_s] if next_s < RunManager.NAMES.size() else "?"
+		var nm: String = run.name_of(next_s) if run != null else (RunManager.NAMES[next_s] if next_s < RunManager.NAMES.size() else "?")
 		var style: String = _style_note(next_s)
 		bits.append("%s ~%s holds a 2%s" % [nm.replace("The ", ""), pct(p_follow), style])
 		if not game.lead:

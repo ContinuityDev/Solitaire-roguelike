@@ -448,6 +448,63 @@ func _init() -> void:
 		20, 0, RoleTrade.ROLE_SCUM)
 	_check(str(shop_pick.get("id", "")) == "just_say_no", "AI Asshole prefers Just Say No")
 
+	# Title modes: solo vs AIs + local hotseat lobby.
+	var solo: LobbyConfig = LobbyConfig.solo()
+	_check(solo.seat_count == 6, "solo is 6 seats")
+	_check(solo.human_seats() == [0], "solo human is seat 0")
+	_check(solo.is_human(0) and solo.is_ai(1) and solo.is_ai(5), "solo: you vs five AIs")
+	_check(solo.can_start(), "solo can start")
+	_check(not solo.is_hotseat(), "solo is not hotseat")
+	_check(not LobbyConfig.needs_handoff(solo, 0, 0), "solo never hands off")
+	_check(LobbyConfig.is_human_turn(solo, 0) and not LobbyConfig.is_human_turn(solo, 2), "solo turn ownership is seat 0")
+	_check(LobbyConfig.make_code().length() == 4, "lobby code is 4 characters")
+
+	var loc: LobbyConfig = LobbyConfig.new()
+	loc.set_seat_count(4)
+	loc.set_kind(0, LobbyConfig.KIND_HUMAN)
+	loc.set_kind(1, LobbyConfig.KIND_HUMAN)
+	loc.set_kind(2, LobbyConfig.KIND_AI)
+	loc.set_kind(3, LobbyConfig.KIND_AI)
+	_check(loc.seat_count == 4, "lobby seat count 4")
+	_check(loc.human_seats() == [0, 1], "two human seats")
+	_check(loc.ai_seats() == [2, 3], "two AI seats")
+	_check(loc.is_hotseat(), "two humans is hotseat")
+	_check(LobbyConfig.needs_handoff(loc, 0, 1), "handoff when the next human is a different seat")
+	_check(not LobbyConfig.needs_handoff(loc, 0, 2), "no handoff for an AI seat")
+	_check(not LobbyConfig.needs_handoff(loc, 1, 1), "no handoff when already viewing that human")
+	_check(LobbyConfig.is_human_turn(loc, 1), "P2 owns their turn")
+	loc.set_kind(1, LobbyConfig.KIND_AI)
+	_check(loc.human_seats() == [0], "kick human → AI leaves host")
+	loc.fill_empty_with_ai()
+	_check(loc.is_ai(1) and loc.is_ai(2) and loc.is_ai(3), "fill empty with AI")
+	loc.set_kind(1, LobbyConfig.KIND_HUMAN)
+	var hot_run: RunManager = RunManager.new()
+	hot_run.start_new_run(loc)
+	_check(hot_run.living_seats() == [0, 1, 2, 3], "4-seat lobby deals 4 living")
+	_check(int(hot_run.hp[4]) == 0 and int(hot_run.hp[5]) == 0, "unused seats sit out at 0 HP")
+	_check(hot_run.is_human(0) and hot_run.is_human(1), "run tracks both humans")
+	_check(hot_run.is_ai(2) and not hot_run.is_human(2), "seat 2 is AI")
+	_check(hot_run.living_humans() == [0, 1], "living humans")
+	hot_run.seat_gold[1] = 40
+	hot_run.seat_gold[2] = 40
+	hot_run.last_finish = [0, 1, 2, 3]
+	var before_h: int = hot_run.gold_of(1)
+	hot_run.ai_shop_all()
+	_check(hot_run.gold_of(1) == before_h, "AI shop does not spend a human seat's gold")
+	hot_run.hp[0] = 0
+	hot_run.hp[1] = 0
+	hot_run._check_end()
+	_check(hot_run.run_over and not hot_run.run_won, "all humans dead is a loss")
+	hot_run.free()
+	var win_run: RunManager = RunManager.new()
+	win_run.start_new_run(loc)
+	win_run.hp[0] = 0
+	win_run.hp[2] = 0
+	win_run.hp[3] = 0
+	win_run._check_end()
+	_check(win_run.run_over and win_run.run_won, "last living human wins")
+	win_run.free()
+
 	run.free()
 	if _failures == 0:
 		print("ALL TESTS PASSED")

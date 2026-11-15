@@ -2,7 +2,7 @@ class_name RunManager
 extends Node
 
 ## President run: HP, gold, round stake, owned upgrades, action inventory.
-## Seat 0 is the human; seats 1-5 are AIs. Every seat has gold and inventory.
+## Human vs AI is LobbyConfig (solo = seat 0 human, 1–5 AIs). Every seat has gold.
 
 signal changed
 
@@ -36,8 +36,13 @@ var role_streak_role: Array = [] # last finish role per seat
 var role_streak_len: Array = [] # consecutive count per seat
 var shop_offers: Array = []
 var shop_rerolls: int = 0
+var shop_seat: int = 0
 var run_over: bool = false
 var run_won: bool = false
+var lobby: LobbyConfig = null
+var seat_count: int = 6
+var human_seats: Array = [0]
+var seat_names: Array = []
 
 var gold: int:
 	get:
@@ -106,7 +111,38 @@ func _ensure_seat_arrays() -> void:
 	while last_roles.size() < SEATS:
 		last_roles.append("")
 
-func start_new_run() -> void:
+func is_human(seat: int) -> bool:
+	return human_seats.has(seat)
+
+func is_ai(seat: int) -> bool:
+	return seat >= 0 and seat < seat_count and not is_human(seat)
+
+func name_of(seat: int) -> String:
+	if seat >= 0 and seat < seat_names.size() and str(seat_names[seat]) != "":
+		return str(seat_names[seat])
+	if seat >= 0 and seat < NAMES.size():
+		return str(NAMES[seat])
+	return "Seat %d" % seat
+
+func living_humans() -> Array:
+	var out: Array = []
+	for s in living_seats():
+		if is_human(int(s)):
+			out.append(int(s))
+	return out
+
+func start_new_run(config = null) -> void:
+	var cfg: LobbyConfig = config as LobbyConfig
+	if cfg == null:
+		cfg = LobbyConfig.solo()
+	lobby = cfg
+	seat_count = clampi(cfg.seat_count, 2, SEATS)
+	human_seats = cfg.human_seats().duplicate()
+	if human_seats.is_empty():
+		human_seats = [0]
+	seat_names = cfg.display_names.duplicate()
+	while seat_names.size() < SEATS:
+		seat_names.append("")
 	round_n = 1
 	seat_gold = []
 	seat_max_hp = []
@@ -117,7 +153,7 @@ func start_new_run() -> void:
 	seat_rank_mods = []
 	hp = []
 	last_roles = []
-	for _i in range(SEATS):
+	for i in range(SEATS):
 		seat_gold.append(0)
 		seat_max_hp.append(START_HP)
 		seat_upgrades.append([])
@@ -125,8 +161,11 @@ func start_new_run() -> void:
 		seat_enhancements.append([])
 		seat_favorite.append(0)
 		seat_rank_mods.append([])
-		hp.append(START_HP)
 		last_roles.append("")
+		if i < seat_count:
+			hp.append(START_HP)
+		else:
+			hp.append(0)
 	_grant_ai_specialties()
 	whip_used = false
 	last_payout.clear()
@@ -143,14 +182,21 @@ func start_new_run() -> void:
 		role_streak_len.append(0)
 	shop_offers.clear()
 	shop_rerolls = 0
+	shop_seat = 0
 	run_over = false
 	run_won = false
 	changed.emit()
 
 func _grant_ai_specialties() -> void:
-	for seat in RankModDB.AI_SPEC.keys():
-		var spec: Dictionary = RankModDB.AI_SPEC[seat]
-		(seat_rank_mods[int(seat)] as Array).append(RankModDB.make(int(spec["rank"]), str(spec["effect"])))
+	for seat in range(seat_count):
+		if not is_ai(seat):
+			continue
+		var spec: Dictionary = {}
+		if RankModDB.AI_SPEC.has(seat):
+			spec = RankModDB.AI_SPEC[seat]
+		else:
+			spec = RankModDB.AI_SPEC[1]
+		(seat_rank_mods[seat] as Array).append(RankModDB.make(int(spec["rank"]), str(spec["effect"])))
 
 func living_seats() -> Array:
 	var out: Array = []
@@ -399,7 +445,7 @@ func apply_payouts(finish_order: Array) -> void:
 		last_payout.append({
 			"seat": seat, "place": place,
 			"gold": gold_gain,
-			"hp_delta": hp_delta, "name": NAMES[seat], "role": role,
+			"hp_delta": hp_delta, "name": name_of(seat), "role": role,
 			"streak": streak, "streak_bonus": streak_bonus,
 		})
 	_check_end()
@@ -407,22 +453,23 @@ func apply_payouts(finish_order: Array) -> void:
 
 func _check_end() -> void:
 	var live: Array = living_seats()
-	if int(hp[0]) <= 0:
+	var live_h: Array = living_humans()
+	if live_h.is_empty():
 		run_over = true
 		run_won = false
 		return
-	if live.size() == 1 and int(live[0]) == 0:
+	if live.size() == 1:
 		run_over = true
-		run_won = true
+		run_won = is_human(int(live[0]))
 
 func buy_upgrade(id: String, price: int) -> bool:
-	return buy_upgrade_for(0, id, price)
+	return buy_upgrade_for(shop_seat, id, price)
 
 func buy_action(id: String, price: int) -> bool:
-	return buy_action_for(0, id, price)
+	return buy_action_for(shop_seat, id, price)
 
 func buy_enhancement(id: String, price: int) -> bool:
-	return buy_enhancement_for(0, id, price)
+	return buy_enhancement_for(shop_seat, id, price)
 
 func buy_upgrade_for(seat: int, id: String, price: int) -> bool:
 	_ensure_seat_arrays()
@@ -467,7 +514,7 @@ func buy_enhancement_for(seat: int, id: String, price: int) -> bool:
 	return true
 
 func spend_action(id: String) -> bool:
-	return spend_action_for(0, id)
+	return spend_action_for(shop_seat, id)
 
 func spend_action_for(seat: int, id: String) -> bool:
 	var inv: Array = actions_of(seat)
@@ -532,20 +579,24 @@ func _tick_role_streak(seat: int, role: String) -> int:
 	return int(role_streak_len[seat])
 
 func begin_shop_visit() -> void:
+	begin_shop_visit_for(0)
+
+func begin_shop_visit_for(seat: int) -> void:
+	shop_seat = seat
 	shop_rerolls = 0
-	shop_offers = ShopStock.draw_offers(rng, self, ShopStock.SLOTS, 0)
+	shop_offers = ShopStock.draw_offers(rng, self, ShopStock.SLOTS, seat)
 	changed.emit()
 
 func reroll_cost() -> int:
-	return shop_price(ShopStock.reroll_cost_at(shop_rerolls))
+	return shop_price_of(shop_seat, ShopStock.reroll_cost_at(shop_rerolls))
 
 func reroll_shop() -> bool:
 	var c: int = reroll_cost()
-	if gold < c:
+	if gold_of(shop_seat) < c:
 		return false
-	gold -= c
+	seat_gold[shop_seat] = gold_of(shop_seat) - c
 	shop_rerolls += 1
-	shop_offers = ShopStock.draw_offers(rng, self, ShopStock.SLOTS, 0)
+	shop_offers = ShopStock.draw_offers(rng, self, ShopStock.SLOTS, shop_seat)
 	changed.emit()
 	return true
 
@@ -564,8 +615,8 @@ func log_event(line: String) -> void:
 ## After payouts, AIs fire role actions then buy 0–1 desk item with their gold.
 func ai_results_actions() -> Array:
 	var logs: Array = []
-	for seat in range(1, SEATS):
-		if not is_alive(seat):
+	for seat in range(SEATS):
+		if not is_alive(seat) or is_human(seat):
 			continue
 		var pick: String = PresidentAI.choose_role_action(last_finish, seat, actions_of(seat).duplicate())
 		if pick == "":
@@ -580,7 +631,7 @@ func ai_results_actions() -> Array:
 
 func apply_results_action(seat: int, id: String) -> String:
 	var live: Array = living_finish()
-	var actor: String = NAMES[seat]
+	var actor: String = name_of(seat)
 	match id:
 		"uprising":
 			if live.size() >= 3:
@@ -607,8 +658,8 @@ func apply_results_action(seat: int, id: String) -> String:
 
 func ai_shop_all() -> Array:
 	var logs: Array = []
-	for seat in range(1, SEATS):
-		if not is_alive(seat):
+	for seat in range(SEATS):
+		if not is_alive(seat) or is_human(seat):
 			continue
 		var offers: Array = ShopStock.draw_offers(rng, self, ShopStock.AI_SLOTS, seat)
 		var priced: Array = []
@@ -629,7 +680,7 @@ func ai_shop_all() -> Array:
 			_:
 				ok = buy_upgrade_for(seat, id, price)
 		if ok:
-			var line: String = "%s buys %s ($%d). Gold left $%d." % [NAMES[seat], str(pick.get("name", id)), price, gold_of(seat)]
+			var line: String = "%s buys %s ($%d). Gold left $%d." % [name_of(seat), str(pick.get("name", id)), price, gold_of(seat)]
 			logs.append(line)
 			log_event(line)
 	return logs
@@ -646,14 +697,14 @@ func apply_deal_effects(game: PresidentGame) -> Array:
 		if promo > 0 and game.hands.has(s):
 			var changed: PackedStringArray = CardForge.promote_lowest(game.hands[s], promo)
 			if not changed.is_empty():
-				logs.append("%s incumbent: %s" % [NAMES[s], ", ".join(changed)])
+				logs.append("%s incumbent: %s" % [name_of(s), ", ".join(changed)])
 		var lucky_n: int = count_enhancement_of(s, "lucky")
 		for _i in range(lucky_n):
 			if not game.hands.has(s):
 				break
 			var sw: String = CardForge.swap_lowest_with_kitty(game.hands[s], game.kitty, rng)
 			if sw != "":
-				logs.append("%s lucky swap: %s" % [NAMES[s], sw])
+				logs.append("%s lucky swap: %s" % [name_of(s), sw])
 		if game.hands.has(s):
 			EnhancementDB.apply_to_hand(game.hands[s], enhancements_of(s), rng)
 			Deck._sort_hand(game.hands[s])

@@ -26,7 +26,7 @@ static func last_place_other(game: PresidentGame, seat: int) -> int:
 
 ## Returns {ok, message, refund}. Caller spends the action first.
 static func apply_turn(game: PresidentGame, run: RunManager, seat: int, id: String) -> Dictionary:
-	var actor: String = RunManager.NAMES[seat] if seat < RunManager.NAMES.size() else "?"
+	var actor: String = run.name_of(seat)
 	match id:
 		"veto":
 			var vs: int = next_opponent(game, seat)
@@ -35,7 +35,7 @@ static func apply_turn(game: PresidentGame, run: RunManager, seat: int, id: Stri
 			if run.cancel_hostile(vs, "veto"):
 				return {"ok": true, "message": "Just Say No — %s's Veto cancelled." % actor, "refund": false}
 			game.skip_seat = vs
-			return {"ok": true, "message": "%s plays Veto — %s will be skipped." % [actor, RunManager.NAMES[vs]], "refund": false}
+			return {"ok": true, "message": "%s plays Veto — %s will be skipped." % [actor, run.name_of(vs)], "refund": false}
 		"filibuster":
 			var fs: int = next_opponent(game, seat)
 			if fs < 0:
@@ -43,7 +43,7 @@ static func apply_turn(game: PresidentGame, run: RunManager, seat: int, id: Stri
 			if run.cancel_hostile(fs, "filibuster"):
 				return {"ok": true, "message": "Just Say No — %s's Filibuster cancelled." % actor, "refund": false}
 			game.must_pass_seat = fs
-			return {"ok": true, "message": "%s plays Filibuster — %s must pass." % [actor, RunManager.NAMES[fs]], "refund": false}
+			return {"ok": true, "message": "%s plays Filibuster — %s must pass." % [actor, run.name_of(fs)], "refund": false}
 		"exec":
 			game.exec_order = true
 			return {"ok": true, "message": "%s plays Executive Order — any rank of the required count." % actor, "refund": false}
@@ -52,7 +52,7 @@ static func apply_turn(game: PresidentGame, run: RunManager, seat: int, id: Stri
 			if ls < 0:
 				return {"ok": false, "message": "%s's Leak fizzled." % actor, "refund": true}
 			game.peek_seat = ls
-			return {"ok": true, "message": "%s plays Leak — peeking %s." % [actor, RunManager.NAMES[ls]], "refund": false}
+			return {"ok": true, "message": "%s plays Leak — peeking %s." % [actor, run.name_of(ls)], "refund": false}
 		"tax":
 			return _tax(game, run, seat, actor)
 		"rally":
@@ -81,4 +81,4 @@ static func _tax(game: PresidentGame, run: RunManager, seat: int, actor: String)
 	oh.erase(card)
 	game.hands[seat].append(card)
 	Deck._sort_hand(game.hands[seat])
-	return {"ok": true, "message": "%s taxes %s for %s." % [actor, RunManager.NAMES[last], card.display_name()], "refund": false}
+	return {"ok": true, "message": "%s taxes %s for %s." % [actor, run.name_of(last), card.display_name()], "refund": false}

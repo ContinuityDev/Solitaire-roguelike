@@ -1,15 +1,25 @@
 # President
 
-You and **five AIs** play President (shedding). Last seat with HP wins the run.
+A cabinet shedding game. **Title screen** first — pick a mode:
+
+- **Solo / vs AIs** — you versus five cabinet AIs (the full President run).
+- **Local Lobby** — host 2–6 seats on this device. Mark seats Human or AI. **Hotseat / pass-the-device** (web + desktop). LAN/WebRTC join is not on the Pages build.
 
 Play in the browser once GitHub Pages is on: https://continuitydev.github.io/Solitaire-roguelike/
+
+### How to start
+1. Open the game. You land on **PRESIDENT / THE CABINET**, not in a run.
+2. **Solo / vs AIs** starts a 6-seat run immediately (you + five AIs). **Title** on the table (or game-over) returns to the menu. **New Run** restarts the same mode.
+3. **Local Lobby** — name and a 4-character code (flavor for the table), **+/– seats** (2–6), each row **Human** or **AI**. Seat 1 is the host (always human). **Empty → AI** fills the rest. **Start** deals. When another human’s turn (or desk) comes up, **Pass the device** covers the cards until they tap **I’m P#**.
+
+Last living **human** wins the run. If every human hits 0 HP, the cabinet outlasts you.
 
 ## How a round works
 
 - 52-card deck, six seats. Rank order: **3 lowest … King, Ace, then 2s (bombs)**.
 - Play **N of a kind** (single, pair, trips, four). Follow with the same count, equal or higher rank. Pass if you cannot or will not.
 - When everyone else passes, the last player to play **leads** anything.
-- **You lead round 1.** Later rounds, last round’s 1st place leads if they are still living; otherwise you do.
+- **Host leads round 1** (seat 0). Later rounds, last round’s 1st place leads if they are still living; otherwise the host does.
 - First empty hand is 1st (**President**). Play continues until everyone is placed: VP, Neutral, Vice-Asshole, **Asshole**.
 - After the next deal, classic **tribute**: Asshole gives their 2 highest cards to President, who returns any 2; Vice-Asshole gives 1 highest to VP, who returns 1. Dead seats skip. With 3 living only the 2-card trade runs; with 2, no trade.
 - 0 HP seats sit out the next deal.
@@ -53,7 +63,7 @@ Finishing in the **same role** consecutive rounds pays bonus gold: streak 1 is b
 
 ## AIs
 
-The Speaker, The Whip, The Veep, The Justice, The General. They dump low cards, follow cheapest, and save 2s unless they are aggressive or about to go out.
+The Speaker, The Whip, The Veep, The Justice, The General (or whoever occupies an AI seat). They dump low cards, follow cheapest, and save 2s unless they are aggressive or about to go out. Empty lobby seats can be kicked to AI.
 
 Each AI starts with a **personal rank specialty** (Speaker: stronger 2s, Whip: gold on 5s, Veep: Aces always legal, Justice: stronger Kings, General: gold on 3s). After payouts they auto-shop 0–1 item from a 2-offer personal desk with their own gold, and they **use** turn actions (Veto, Filibuster, Tax, Rally, Forge, …) and role cards (Uprising, Just Say No, …). Purchases and uses land in the round log so you can see them.
 
