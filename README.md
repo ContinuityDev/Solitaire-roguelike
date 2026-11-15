@@ -1,5 +1,9 @@
 # Solitaire Roguelike
 
+> **▶ Play in your browser:** https://continuitydev.github.io/Solitaire-roguelike/
+>
+> _One-time setup still needed (takes ~30 seconds): repo **Settings → Pages → Branch: `main`, folder: `/docs` → Save**. The link above goes live a few minutes after that — everything it needs is already pushed in `docs/`._
+
 A Balatro-like roguelike built on Klondike solitaire, in **Godot 4.x** (developed against 4.3, no external assets — every card is drawn with code).
 
 You start a run with a tiny deck of only **Aces through 5s**. Win blinds, pick upgrades in the shop, and escalate your deck through the court — Jacks, Queens, Kings — and then *past* them: **Emperors, Titans, Seraphs, Deities**, and beyond.
@@ -29,7 +33,7 @@ Internal code names (`ante`, `combo_chain`, upgrade ids, `kind: "relic"`, ...) a
 
 ## Play it
 
-- **Hosted web version:** once GitHub Pages is enabled for this repo (see *Hosting* below), the playable game is served from the `docs/` folder. On the Cursor-hosted copy, use the shareable link Hayden confirms in the publish dialog.
+- **Hosted web version:** https://continuitydev.github.io/Solitaire-roguelike/ — served from the `docs/` folder once GitHub Pages is enabled (see *Hosting* below).
 - **Local web version (no Godot needed):**
 
   ```bash
@@ -44,9 +48,9 @@ Internal code names (`ante`, `combo_chain`, upgrade ids, `kind: "relic"`, ...) a
 
 The web export is committed under `docs/` so GitHub Pages can serve it with no build step:
 
-1. Push this repo to GitHub as `solitaire-roguelike`.
+1. This repo is already pushed to GitHub (`main` contains `project.godot` and `docs/index.html`).
 2. Repo **Settings → Pages → Build and deployment → Source: Deploy from a branch → Branch: `main`, folder: `/docs`** → Save.
-3. The game appears at `https://<github-user>.github.io/solitaire-roguelike/` (GitHub shows the exact URL on that Settings page once deployed).
+3. The game appears at **https://continuitydev.github.io/Solitaire-roguelike/** (GitHub shows the exact URL on that Settings page once deployed, usually within a few minutes).
 
 `docs/.nojekyll` is included so Pages serves the Godot files (including the `.wasm`/`.pck`) as-is.
 
