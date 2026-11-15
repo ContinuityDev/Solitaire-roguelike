@@ -29,6 +29,3 @@ func label() -> String:
 
 func display_name() -> String:
 	return "%s of %s" % [RankSystem.full_name(rank), SUIT_NAMES[clampi(suit, 0, 3)]]
-
-func chip_value() -> int:
-	return RankSystem.chip_value(rank)
