@@ -2,7 +2,7 @@ class_name RankSystem
 extends RefCounted
 
 ## Standard French ranks. President power is 3-low through Ace, with 2s
-## sitting above Ace as the bomb rank. Rank 0 is a Joker (round-ender).
+## sitting above Ace as the bomb rank. Rank 0 is a Joker (pile clearer).
 ## Ranks 16+ are "super" faces used by round inflation and uncapped promotes;
 ## their follow power equals the rank number (so they climb past bombs).
 
