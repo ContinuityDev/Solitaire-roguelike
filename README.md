@@ -8,6 +8,8 @@ A cabinet shedding game with an **endless Balatro-style run**. **Title screen** 
 
 Play in the browser once GitHub Pages is on: https://continuitydev.github.io/Solitaire-roguelike/
 
+**Web export:** GitHub Pages serves `docs/`. After gameplay logic changes, re-export with `godot --headless --path . --export-release "Web" docs/index.html` and commit the updated `docs/` artifacts. The in-game title shows `bN` (build id) so you can confirm Pages picked up the new pack.
+
 ### How to start
 1. Open the game. You land on **PRESIDENT / THE CABINET**, not in a run. The title shows your **best round** reached.
 2. **Solo / vs AIs** starts a 6-seat endless run immediately (you + five AIs). **Title** on the table (or game-over) returns to the menu. **New Run** restarts the same mode.
